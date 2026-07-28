@@ -287,10 +287,16 @@ function __glob_complete_install_bash_completion() {
 }
 
 function __glob_complete_register_bash_completion_reentry() {
+  local _source_dir
   local _this_file
   local _user_file
 
-  _this_file=$(readlink -f -- "${BASH_SOURCE[0]}")
+  # NOTE: 'readlink' and 'realpath' on Git for Windows cannot canonicalize files
+  # or absolute directories on a WSL UNC share. As a workaround we let Bash
+  # enter the directory and report its physical path instead; this also works
+  # with ordinary Linux paths and relative names
+  _source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+  _this_file=$_source_dir/$(basename -- "${BASH_SOURCE[0]}")
   _user_file=${BASH_COMPLETION_USER_FILE:-${HOME}/.bash_completion}
 
   if [[ ! -v _GLOB_COMPLETE_CHAINED_USER_FILE ]]; then

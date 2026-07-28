@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-_SCRIPT_DIR=$(readlink -f -- "$(dirname -- "${BASH_SOURCE[0]}")")
+_SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 _SCRIPT_BASENAME=$(basename -- "${BASH_SOURCE[0]}")
 
 # ---
