@@ -256,23 +256,15 @@ function __main() {
     '_CHAINED_USER_FILE_COUNT=$(( ${_CHAINED_USER_FILE_COUNT:-0} + 1 ))' \
     > "$_user_file"
 
-  local _case
-  local -a _arr_failed_cases=()
-  for _case in 1 2 3 4 5 6; do
-    # Verify each sourcing order in a completely fresh Bash process.
-    # shellcheck disable=SC2016 # Positional parameters belong to the child Bash.
-    if ! bash \
-      --noprofile \
-      --norc \
-      -c \
-      '
+  # shellcheck disable=SC2016 # Positional parameters belong to the child Bash.
+  local _child_script='
       set -eo pipefail
 
-      _case=$1
-      _tmp_dir=$2
-      _glob=$3
-      _bash_completion=$4
-      _user_file=$5
+      _case=${1:?"missing arg 1"}
+      _tmp_dir=${2:?"missing arg 2"}
+      _glob=${3:?"missing arg 3"}
+      _bash_completion=${4:?"missing arg 4"}
+      _user_file=${5:?"missing arg 5"}
 
       cd -- "$_tmp_dir"
       declare -g TEST_GLOB_ROOT=$_tmp_dir
@@ -357,14 +349,25 @@ function __main() {
       }
 
       echo "case $_case: ok"
-      ' \
-      bash \
-      "$_case" \
-      "$_tmp_dir" \
-      "$_SCRIPT_DIR/glob-complete.bash" \
-      "$_bash_completion" \
+      '
+
+  local _case
+  local -a _arr_failed_cases=()
+  for _case in 1 2 3 4 5 6; do
+    # Verify each sourcing order in a completely fresh Bash process.
+    local -a _arr_bash_args=(
+      --noprofile
+      --norc
+      -c
+      "$_child_script"
+      bash              # $0
+      "$_case"          # $1
+      "$_tmp_dir"       # ...
+      "$_SCRIPT_DIR/glob-complete.bash"
+      "$_bash_completion"
       "$_user_file"
-    then
+    )
+    if ! bash "${_arr_bash_args[@]}"; then
       _arr_failed_cases+=("$_case")
     fi
   done
