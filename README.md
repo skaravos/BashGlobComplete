@@ -47,6 +47,12 @@ shopt -s extglob
 cd @(build|dist)<Tab>
 ```
 
+With `nocaseglob` enabled, suggestions are case-insensitive:
+
+```bash
+shopt -s nocaseglob
+```
+
 Leading variables and tilde expressions are expanded for matching without
 being replaced in the command line:
 
