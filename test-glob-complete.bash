@@ -257,10 +257,11 @@ function __main() {
     > "$_user_file"
 
   local _case
+  local -a _arr_failed_cases=()
   for _case in 1 2 3 4 5 6; do
     # Verify each sourcing order in a completely fresh Bash process.
     # shellcheck disable=SC2016 # Positional parameters belong to the child Bash.
-    bash \
+    if ! bash \
       --noprofile \
       --norc \
       -c \
@@ -362,9 +363,15 @@ function __main() {
       "$_tmp_dir" \
       "$_SCRIPT_DIR/glob-complete.bash" \
       "$_bash_completion" \
-      "$_user_file" ||
-      __fail "sourcing-order case $_case failed"
+      "$_user_file"
+    then
+      _arr_failed_cases+=("$_case")
+    fi
   done
+
+  if ((${#_arr_failed_cases[@]} != 0)); then
+    __fail "sourcing-order case(s) failed: ${_arr_failed_cases[*]}"
+  fi
 
   printf 'all tests passed\n'
 }
