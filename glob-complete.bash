@@ -1,7 +1,14 @@
 # shellcheck shell=bash
+#
+# Copyright (C) 2026 Stephen Karavos
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# <https://github.com/skaravos/BashGlobComplete>
+#
 # This file is meant to be sourced by an interactive Bash shell.
 # It works both before and after bash-completion is loaded, and it is resilient
 # to either file being sourced again afterwards.
+#
 
 [[ -n ${PS1} ]] && echo "dot sourcing ${BASH_SOURCE[0]}"
 
