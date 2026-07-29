@@ -234,7 +234,10 @@ function __main() {
   cur='ba'
   COMPREPLY=()
   _comp_compgen_filedir -d || true
-  __assert_array bar baz
+  # NOTE: a pattern with no glob chars is delegated to bash-completion, whose
+  # direct call to 'compgen' returns entries in an unspecified order
+  [[ ${COMPREPLY[*]} == 'bar baz' || ${COMPREPLY[*]} == 'baz bar' ]] ||
+    __fail "expected bar and baz in either order, got [${COMPREPLY[*]}]"
 
   # shellcheck disable=SC2034 # Read indirectly by _comp_compgen_filedir.
   cur='*.t'
@@ -330,7 +333,7 @@ function __main() {
         cur="ba"
         COMPREPLY=()
         _comp_compgen_filedir -d || true
-        [[ $(printf "%s " "${COMPREPLY[@]}") == "bar baz " ]] || {
+        [[ ${COMPREPLY[*]} == "bar baz" || ${COMPREPLY[*]} == "baz bar" ]] || {
           >&2 echo "case $_case: bad literal COMPREPLY [${COMPREPLY[*]}]"
           exit 1
         }
