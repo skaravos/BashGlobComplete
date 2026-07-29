@@ -1,0 +1,3 @@
+# force all shell and bash files to always be LF
+*.sh   text eol=lf
+*.bash text eol=lf
