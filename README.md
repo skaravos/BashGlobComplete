@@ -66,6 +66,40 @@ For example, a match under `$HOME` is inserted as `$HOME/project/`, not as its
 absolute path. Special characters in the rest of the pathname are escaped.
 Array and nameref variables are not expanded.
 
+## Listing possible completions
+
+The Readline `possible-completions` command lists the full matching path when
+a glob appears in a non-leaf directory component. This keeps matches with the
+same leaf name distinguishable. For example, completing
+`~/projects/*/.vscode` with this bash module may display:
+
+```text
+~/projects/foo/.vscode/  ~/projects/bar/.vscode/
+```
+
+Readline can also be made to abbreviate common prefixes with an ellipsis to make
+deeply nested completions easier to read.
+To enable this for all completion lists, add the following to `~/.inputrc`:
+
+```inputrc
+set completion-prefix-display-length 1
+```
+
+The example above would then be displayed as:
+
+```text
+...foo/.vscode/  ...bar/.vscode/
+```
+
+The number is the maximum common-prefix length Readline displays without
+abbreviation. Any value greater than zero enables this behavior; a value of
+`1` abbreviates nearly every nontrivial common prefix.
+To try the setting in the current shell before editing `~/.inputrc`, run:
+
+```bash
+bind 'set completion-prefix-display-length 1'
+```
+
 ## Menu-style completion
 
 To make Tab select one match at a time and Shift-Tab move backwards, add these
