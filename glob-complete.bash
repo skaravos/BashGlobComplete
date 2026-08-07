@@ -27,6 +27,15 @@ function __glob_complete_word_has_glob() {
   [[ $_word == *'@('* || $_word == *'+('* || $_word == *'!('* ]]
 }
 
+function __glob_complete_word_has_glob_in_directory() {
+  local _word=${1-}
+  local _directory
+
+  [[ $_word == */* ]] || return 1
+  _directory=${_word%/*}
+  __glob_complete_word_has_glob "$_directory"
+}
+
 function __glob_complete_expand_variable_prefix() {
   local _word=$1
   local _expanded_word_name=$2
@@ -148,6 +157,7 @@ function __glob_complete_collect_filedir() {
   local _arg=$1
   local _word=$2
   local _output_name=$3
+  local _quote_as_shell_text=${4-off}
   local _pattern=$_word
   local _candidate
   local _display_candidate
@@ -194,9 +204,13 @@ function __glob_complete_collect_filedir() {
       _remainder=${_candidate#"$_expanded_prefix"}
       printf -v _quoted_remainder '%q' "$_remainder"
       _display_candidate=$_typed_prefix$_quoted_remainder
-      if [[ -d $_candidate && $_quoted_remainder != "$_remainder" ]]; then
+      if [[ -d $_candidate ]] &&
+        [[ $_quote_as_shell_text == on || $_quoted_remainder != "$_remainder" ]]; then
         _display_candidate+=/
       fi
+    elif [[ $_quote_as_shell_text == on ]]; then
+      printf -v _display_candidate '%q' "$_candidate"
+      [[ -d $_candidate ]] && _display_candidate+=/
     fi
     _arr_filtered+=("$_display_candidate")
   done
@@ -209,13 +223,25 @@ function __glob_complete_default() {
   local _expanded_word
   local _expanded_prefix
   local _typed_prefix
+  local _quote_as_shell_text=off
 
   COMPREPLY=()
   if __glob_complete_word_has_glob "$_cur"; then
-    __glob_complete_collect_filedir '' "$_cur" COMPREPLY
+    if __glob_complete_word_has_glob_in_directory "$_cur"; then
+      _quote_as_shell_text=on
+    fi
+    __glob_complete_collect_filedir \
+      '' "$_cur" COMPREPLY "$_quote_as_shell_text"
     if ((${#COMPREPLY[@]})); then
-      compopt -o filenames 2>/dev/null || true
-      if __glob_complete_expand_prefix \
+      if [[ $_quote_as_shell_text == on ]]; then
+        # Readline displays only the basename of candidates marked as
+        # filenames.  Preserve the full path when a directory component is a
+        # glob, while retaining filename-safe insertion through pre-quoting.
+        compopt +o filenames -o noquote 2>/dev/null || true
+      else
+        compopt -o filenames 2>/dev/null || true
+      fi
+      if [[ $_quote_as_shell_text == off ]] && __glob_complete_expand_prefix \
         "$_cur" _expanded_word _expanded_prefix _typed_prefix 2>/dev/null; then
         compopt -o noquote 2>/dev/null || true
       fi
@@ -228,12 +254,21 @@ function __glob_complete_generate_bash_completion_filedir() {
   local _expanded_word
   local _expanded_prefix
   local _typed_prefix
+  local _quote_as_shell_text=off
   local -a _arr_results=()
 
-  __glob_complete_collect_filedir "$_arg" "${cur-}" _arr_results
+  if __glob_complete_word_has_glob_in_directory "${cur-}"; then
+    _quote_as_shell_text=on
+  fi
+  __glob_complete_collect_filedir \
+    "$_arg" "${cur-}" _arr_results "$_quote_as_shell_text"
   if ((${#_arr_results[@]})); then
-    compopt -o filenames 2>/dev/null || true
-    if __glob_complete_expand_prefix \
+    if [[ $_quote_as_shell_text == on ]]; then
+      compopt +o filenames -o noquote 2>/dev/null || true
+    else
+      compopt -o filenames 2>/dev/null || true
+    fi
+    if [[ $_quote_as_shell_text == off ]] && __glob_complete_expand_prefix \
       "${cur-}" _expanded_word _expanded_prefix _typed_prefix 2>/dev/null; then
       compopt -o noquote 2>/dev/null || true
     fi
