@@ -67,11 +67,13 @@ function __main() {
   _tmp_dir=$(mktemp -d)
   declare -g _TEST_TMP_DIR=$_tmp_dir
   trap 'rm -rf -- "${_TEST_TMP_DIR:?}"' EXIT
-  mkdir \
+  mkdir -p \
     -- \
     "$_tmp_dir/bar" \
     "$_tmp_dir/baz" \
     "$_tmp_dir/foo" \
+    "$_tmp_dir/project-one/.vscode" \
+    "$_tmp_dir/project-two/.vscode" \
     "$_tmp_dir/tilde-root" \
     "$_tmp_dir/prefix room"
   touch \
@@ -80,7 +82,9 @@ function __main() {
     "$_tmp_dir/data.log" \
     "$_tmp_dir/"$'split\nentry' \
     "$_tmp_dir/white room" \
-    "$_tmp_dir/"$'key\tword'
+    "$_tmp_dir/"$'key\tword' \
+    "$_tmp_dir/project-one/read me.txt" \
+    "$_tmp_dir/project-two/read me.txt"
   cd -- "$_tmp_dir"
   HOME=$_tmp_dir
 
@@ -121,6 +125,26 @@ function __main() {
   COMPREPLY=()
   __glob_complete_default cd 'key*' cd
   __assert_array $'key\tword'
+
+  COMPREPLY=()
+  __glob_complete_default cd 'project-*/.vscode' cd
+  __assert_array \
+    'project-one/.vscode/' \
+    'project-two/.vscode/'
+
+  COMPREPLY=()
+  # shellcheck disable=SC2088 # The literal tilde is test input.
+  __glob_complete_default cd '~/project-*/.vscode' cd
+  # shellcheck disable=SC2088 # The literal tilde is expected output.
+  __assert_array \
+    '~/project-one/.vscode/' \
+    '~/project-two/.vscode/'
+
+  COMPREPLY=()
+  __glob_complete_default stat 'project-*/*me.txt' stat
+  __assert_array \
+    'project-one/read\ me.txt' \
+    'project-two/read\ me.txt'
 
   COMPREPLY=()
   # shellcheck disable=SC2016 # The literal parameter expansion is test input.
@@ -223,6 +247,29 @@ function __main() {
   COMPREPLY=()
   _comp_compgen_filedir || true
   __assert_array $'split\nentry'
+
+  cur='project-*/.vscode'
+  COMPREPLY=()
+  _comp_compgen_filedir -d || true
+  __assert_array \
+    'project-one/.vscode/' \
+    'project-two/.vscode/'
+
+  # shellcheck disable=SC2088 # The literal tilde is test input.
+  cur='~/project-*/.vscode'
+  COMPREPLY=()
+  _comp_compgen_filedir -d || true
+  # shellcheck disable=SC2088 # The literal tilde is expected output.
+  __assert_array \
+    '~/project-one/.vscode/' \
+    '~/project-two/.vscode/'
+
+  cur='project-*/*me.txt'
+  COMPREPLY=()
+  _comp_compgen_filedir || true
+  __assert_array \
+    'project-one/read\ me.txt' \
+    'project-two/read\ me.txt'
 
   shopt -s extglob
   cur='@(bar|foo)'
