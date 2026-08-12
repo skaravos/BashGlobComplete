@@ -53,6 +53,7 @@ function __main() {
   local _bash_completion=${BASH_COMPLETION_FILE:-/usr/share/bash-completion/bash_completion}
   local _tmp_dir
 
+  unset GLOB_COMPLETE_FIND_COMMAND GLOB_COMPLETE_FZF
   BASH_COMPLETION_USER_FILE=/dev/null
   shopt -u extglob
   # shellcheck disable=SC1091 # Path is resolved relative to this test script.
@@ -72,21 +73,102 @@ function __main() {
     "$_tmp_dir/bar" \
     "$_tmp_dir/baz" \
     "$_tmp_dir/foo" \
+    "$_tmp_dir/project-one/first-Docker-app" \
+    "$_tmp_dir/project-one/second-Docker-app" \
     "$_tmp_dir/project-one/.vscode" \
     "$_tmp_dir/project-two/.vscode" \
+    "$_tmp_dir/.hidden" \
+    "$_tmp_dir/node_modules/package" \
     "$_tmp_dir/tilde-root" \
     "$_tmp_dir/prefix room"
   touch \
     -- \
     "$_tmp_dir/data.txt" \
     "$_tmp_dir/data.log" \
+    "$_tmp_dir/.hidden/ignored.txt" \
+    "$_tmp_dir/node_modules/package/ignored.txt" \
     "$_tmp_dir/"$'split\nentry' \
     "$_tmp_dir/white room" \
     "$_tmp_dir/"$'key\tword' \
     "$_tmp_dir/project-one/read me.txt" \
     "$_tmp_dir/project-two/read me.txt"
+  ln -s -- \
+    "$_tmp_dir/project-one" \
+    "$_tmp_dir/project-one/cycle"
   cd -- "$_tmp_dir"
   HOME=$_tmp_dir
+
+  local _find_backend
+  local _find_command
+  local _found_data_txt=0
+  local _found_directory=0
+  local _found_excluded_path=0
+  local _followed_symlink_cycle=0
+  local _fzf_candidate
+  local _scanner_name
+  local _scanner_test_bin=$_tmp_dir/tools
+  local -a _arr_fzf_candidates=()
+  GLOB_COMPLETE_FIND_COMMAND=bash
+  __glob_complete_select_find_command _find_backend _find_command ||
+    __fail 'could not select the explicit Bash candidate scanner'
+  [[ $_find_backend == bash && -z $_find_command ]] ||
+    __fail "unexpected explicit scanner: $_find_backend [$_find_command]"
+  readarray -d '' -t _arr_fzf_candidates < <(
+    __glob_complete_generate_fzf_candidates \
+      txt "$_tmp_dir" "$_find_backend" "$_find_command"
+  )
+  for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+    case $_fzf_candidate in
+      "$_tmp_dir/data.txt") _found_data_txt=1 ;;
+      "$_tmp_dir/project-one/") _found_directory=1 ;;
+      */.hidden/*|*/node_modules/*) _found_excluded_path=1 ;;
+      */cycle/?*) _followed_symlink_cycle=1 ;;
+    esac
+  done
+  ((_found_data_txt)) || __fail 'Bash scanner omitted a matching file'
+  ((_found_directory)) || __fail 'Bash scanner omitted a directory'
+  ((! _found_excluded_path)) || __fail 'Bash scanner included an excluded path'
+  ((! _followed_symlink_cycle)) || __fail 'Bash scanner followed a directory symlink'
+  unset GLOB_COMPLETE_FIND_COMMAND
+
+  mkdir -p -- "$_scanner_test_bin"
+  for _scanner_name in find fdfind fd; do
+    printf '#!/usr/bin/env bash\n' > "$_scanner_test_bin/$_scanner_name"
+  done
+  chmod +x -- "$_scanner_test_bin"/*
+
+  PATH=$_scanner_test_bin \
+    __glob_complete_select_find_command _find_backend _find_command ||
+    __fail 'could not select find'
+  [[ $_find_backend == find && $_find_command == find ]] ||
+    __fail "find was not selected first: $_find_backend [$_find_command]"
+  chmod -x -- "$_scanner_test_bin/find"
+
+  PATH=$_scanner_test_bin \
+    __glob_complete_select_find_command _find_backend _find_command ||
+    __fail 'could not select fdfind'
+  [[ $_find_backend == fd && $_find_command == fdfind ]] ||
+    __fail "fdfind was not selected second: $_find_backend [$_find_command]"
+  chmod -x -- "$_scanner_test_bin/fdfind"
+
+  PATH=$_scanner_test_bin \
+    __glob_complete_select_find_command _find_backend _find_command ||
+    __fail 'could not select fd'
+  [[ $_find_backend == fd && $_find_command == fd ]] ||
+    __fail "fd was not selected third: $_find_backend [$_find_command]"
+  chmod -x -- "$_scanner_test_bin/fd"
+
+  PATH=$_scanner_test_bin \
+    __glob_complete_select_find_command _find_backend _find_command ||
+    __fail 'could not select the automatic Bash candidate scanner'
+  [[ $_find_backend == bash && -z $_find_command ]] ||
+    __fail "Bash was not selected last: $_find_backend [$_find_command]"
+
+  GLOB_COMPLETE_FIND_COMMAND=unsupported
+  if __glob_complete_select_find_command _find_backend _find_command; then
+    __fail 'an unsupported explicit scanner was accepted'
+  fi
+  unset GLOB_COMPLETE_FIND_COMMAND
 
   COMPREPLY=()
   __glob_complete_default cd '*a' cd
@@ -199,6 +281,144 @@ function __main() {
   set +f
   shopt -u nullglob failglob dotglob
 
+  local _resolved_query
+  local _resolved_root
+  __glob_complete_resolve_fzf_root \
+    "$_tmp_dir/project-o*/read" _resolved_root _resolved_query
+  [[ $_resolved_root == "$_tmp_dir/project-one" ]] ||
+    __fail "unexpected fzf root: $_resolved_root"
+  [[ $_resolved_query == read ]] ||
+    __fail "unexpected fzf query: $_resolved_query"
+
+  __glob_complete_resolve_fzf_root \
+    "$_tmp_dir/project-*/read" _resolved_root _resolved_query
+  [[ $_resolved_root == "$_tmp_dir" ]] ||
+    __fail "unexpected ambiguous fzf root: $_resolved_root"
+  [[ $_resolved_query == "'project- read" ]] ||
+    __fail "unexpected ambiguous fzf query: $_resolved_query"
+
+  __glob_complete_resolve_fzf_root \
+    "$_tmp_dir/project-o*/*Docker*/sc" _resolved_root _resolved_query
+  [[ $_resolved_root == "$_tmp_dir/project-one" ]] ||
+    __fail "unexpected partial fzf root: $_resolved_root"
+  [[ $_resolved_query == "'Docker sc" ]] ||
+    __fail "unexpected partial fzf query: $_resolved_query"
+
+  __glob_complete_resolve_fzf_root \
+    "$_tmp_dir/project-*/*Docker*/sc" _resolved_root _resolved_query
+  [[ $_resolved_root == "$_tmp_dir" ]] ||
+    __fail "unexpected multi-glob fzf root: $_resolved_root"
+  [[ $_resolved_query == "'project- 'Docker sc" ]] ||
+    __fail "unexpected multi-glob fzf query: $_resolved_query"
+
+  __glob_complete_build_fzf_query 'literal\*star' _resolved_query fuzzy
+  [[ $_resolved_query == 'literal*star' ]] ||
+    __fail "unexpected escaped-glob fzf query: $_resolved_query"
+
+  # Exercise fzf integration without requiring fzf itself.  The stand-in reads
+  # the NUL-delimited candidate stream and returns the requested candidate.
+  local _fzf_bin_dir=$_tmp_dir/fzf-bin
+  local _original_path=$PATH
+  mkdir -p -- "$_fzf_bin_dir"
+  # shellcheck disable=SC2016 # The expressions belong to the generated script.
+  printf \
+    '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -eo pipefail' \
+    '_header=' \
+    '_query=' \
+    '_read_stdin=0' \
+    '_root=' \
+    '_walker=' \
+    'while (($#)); do' \
+    '  case $1 in' \
+    '    --header) _header=$2; shift 2 ;;' \
+    '    --query) _query=$2; shift 2 ;;' \
+    '    --read0) _read_stdin=1; shift ;;' \
+    '    --walker-root) _root=$2; shift 2 ;;' \
+    '    --walker=*) _walker=${1#--walker=}; shift ;;' \
+    '    *) shift ;;' \
+    '  esac' \
+    'done' \
+    '[[ $_header == "${GLOB_COMPLETE_FZF_TEST_HEADER-}" ]] || exit 2' \
+    '[[ $_query == "${GLOB_COMPLETE_FZF_TEST_QUERY-}" ]] || exit 2' \
+    '[[ $_root == "${GLOB_COMPLETE_FZF_TEST_ROOT-}" ]] || exit 2' \
+    '[[ $_walker == "${GLOB_COMPLETE_FZF_TEST_WALKER-}" ]] || exit 2' \
+    'case ${GLOB_COMPLETE_FZF_TEST_MODE-} in' \
+    '  cancel) exit 130 ;;' \
+    '  error) exit 2 ;;' \
+    'esac' \
+    '[[ -n ${GLOB_COMPLETE_FZF_TEST_SELECTION-} ]] || exit 2' \
+    'if ((_read_stdin)); then' \
+    '  while IFS= read -r -d "" _candidate; do :; done' \
+    'fi' \
+    'printf "%s\\0" "$GLOB_COMPLETE_FZF_TEST_SELECTION"' \
+    > "$_fzf_bin_dir/fzf"
+  chmod +x -- "$_fzf_bin_dir/fzf"
+
+  PATH=$_fzf_bin_dir:$_original_path
+  GLOB_COMPLETE_FZF=1
+  export GLOB_COMPLETE_FZF_TEST_HEADER='root: .'
+  export GLOB_COMPLETE_FZF_TEST_MODE=
+  export GLOB_COMPLETE_FZF_TEST_QUERY=project
+  export GLOB_COMPLETE_FZF_TEST_ROOT=.
+  export GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/read me.txt'
+  export GLOB_COMPLETE_FZF_TEST_WALKER=file,dir,follow
+  COMPREPLY=()
+  __glob_complete_default stat 'project**' stat
+  __assert_array 'project-one/read me.txt'
+
+  GLOB_COMPLETE_FZF_TEST_QUERY='split'
+  GLOB_COMPLETE_FZF_TEST_SELECTION=$'split\nentry'
+  COMPREPLY=()
+  __glob_complete_default stat 'split**' stat
+  __assert_array $'split\nentry'
+
+  GLOB_COMPLETE_FZF_TEST_QUERY='read'
+  GLOB_COMPLETE_FIND_COMMAND=bash
+  GLOB_COMPLETE_FZF_TEST_HEADER="root: $_tmp_dir/project-one"
+  GLOB_COMPLETE_FZF_TEST_ROOT=$_tmp_dir/project-one
+  GLOB_COMPLETE_FZF_TEST_SELECTION=$_tmp_dir/project-one/read\ me.txt
+  COMPREPLY=()
+  # shellcheck disable=SC2088 # The literal tilde is test input.
+  __glob_complete_default stat '~/project-o*/read**' stat
+  # shellcheck disable=SC2088 # The literal tilde is expected output.
+  __assert_array '~/project-one/read\ me.txt'
+
+  GLOB_COMPLETE_FZF_TEST_HEADER='root: .'
+  GLOB_COMPLETE_FZF_TEST_MODE=cancel
+  GLOB_COMPLETE_FZF_TEST_QUERY=project
+  GLOB_COMPLETE_FZF_TEST_ROOT=.
+  GLOB_COMPLETE_FZF_TEST_SELECTION=
+  COMPREPLY=()
+  __glob_complete_default stat 'project**' stat
+  __assert_array 'project**'
+
+  GLOB_COMPLETE_FZF_TEST_MODE=error
+  GLOB_COMPLETE_FZF_TEST_QUERY=a
+  GLOB_COMPLETE_FZF_TEST_WALKER=file,dir,follow
+  COMPREPLY=()
+  __glob_complete_default stat '*a**' stat
+  __assert_array bar baz data.log data.txt
+
+  # A missing executable takes the same ordinary-glob fallback path.
+  # shellcheck disable=SC2123 # An empty PATH deliberately hides fzf.
+  PATH=
+  GLOB_COMPLETE_FZF_TEST_MODE=
+  COMPREPLY=()
+  __glob_complete_default stat '*a**' stat
+  __assert_array bar baz data.log data.txt
+  PATH=$_original_path
+  unset \
+    GLOB_COMPLETE_FZF \
+    GLOB_COMPLETE_FZF_TEST_HEADER \
+    GLOB_COMPLETE_FIND_COMMAND \
+    GLOB_COMPLETE_FZF_TEST_MODE \
+    GLOB_COMPLETE_FZF_TEST_QUERY \
+    GLOB_COMPLETE_FZF_TEST_ROOT \
+    GLOB_COMPLETE_FZF_TEST_SELECTION \
+    GLOB_COMPLETE_FZF_TEST_WALKER
+
   if [[ ! -r $_bash_completion ]]; then
     __print_warn "not found: $_bash_completion; skipping bash-completion integration tests"
     printf 'all standalone tests passed\n'
@@ -213,6 +433,41 @@ function __main() {
   declare -f _comp_complete_minimal |
     grep -q -- '__glob_complete_word_has_glob' ||
     __fail 'bash-completion minimal fallback was not wrapped'
+
+  PATH=$_fzf_bin_dir:$_original_path
+  GLOB_COMPLETE_FZF=1
+  export GLOB_COMPLETE_FZF_TEST_HEADER='root: .'
+  export GLOB_COMPLETE_FZF_TEST_MODE=
+  export GLOB_COMPLETE_FZF_TEST_QUERY=project
+  export GLOB_COMPLETE_FZF_TEST_ROOT=.
+  export GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/'
+  export GLOB_COMPLETE_FZF_TEST_WALKER=dir,follow
+  cur='project**'
+  COMPREPLY=()
+  _comp_compgen_filedir -d || true
+  __assert_array project-one
+
+  GLOB_COMPLETE_FZF_TEST_QUERY='read'
+  GLOB_COMPLETE_FIND_COMMAND=bash
+  GLOB_COMPLETE_FZF_TEST_HEADER='root: project-one'
+  GLOB_COMPLETE_FZF_TEST_ROOT=
+  GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/read me.txt'
+  GLOB_COMPLETE_FZF_TEST_WALKER=
+  cur='project-one/read**'
+  COMPREPLY=()
+  _comp_compgen_filedir txt || true
+  __assert_array 'project-one/read me.txt'
+
+  PATH=$_original_path
+  unset \
+    GLOB_COMPLETE_FZF \
+    GLOB_COMPLETE_FZF_TEST_HEADER \
+    GLOB_COMPLETE_FIND_COMMAND \
+    GLOB_COMPLETE_FZF_TEST_MODE \
+    GLOB_COMPLETE_FZF_TEST_QUERY \
+    GLOB_COMPLETE_FZF_TEST_ROOT \
+    GLOB_COMPLETE_FZF_TEST_SELECTION \
+    GLOB_COMPLETE_FZF_TEST_WALKER
 
   cur='*a'
   COMPREPLY=()
