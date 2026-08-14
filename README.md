@@ -90,6 +90,8 @@ normal fuzzy-search term. For example, if `~/proj*` matches only `~/projects`,
 then `~/proj*/*Docker*/sc**` searches below `~/projects` with the initial query
 `'Docker sc`. The leading single quote is fzf's exact-match operator for the
 directory term; `sc` retains fzf's normal fuzzy matching.
+If the final pathname component is empty, the initial query ends in a space so
+that newly typed text starts a separate fuzzy-search term.
 
 The picker displays the search root in a fixed header. For unrestricted file
 and directory completion and directory-only completion, candidates are streamed

@@ -466,10 +466,8 @@ function __glob_complete_resolve_fzf_root() {
     __glob_complete_build_fzf_query \
       "$_unresolved_pattern" "$_query_name"
     __glob_complete_build_fzf_query "$_leaf" _leaf_query fuzzy
-    if [[ -n $_leaf_query ]]; then
-      [[ -n $_query_output ]] && _query_output+=' '
-      _query_output+=$_leaf_query
-    fi
+    [[ -n $_query_output ]] && _query_output+=' '
+    _query_output+=$_leaf_query
     return 0
   done
 

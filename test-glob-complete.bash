@@ -298,6 +298,13 @@ function __main() {
     __fail "unexpected ambiguous fzf query: $_resolved_query"
 
   __glob_complete_resolve_fzf_root \
+    "$_tmp_dir/project-*/" _resolved_root _resolved_query
+  [[ $_resolved_root == "$_tmp_dir" ]] ||
+    __fail "unexpected trailing-glob fzf root: $_resolved_root"
+  [[ $_resolved_query == "'project- " ]] ||
+    __fail "unexpected trailing-glob fzf query: $_resolved_query"
+
+  __glob_complete_resolve_fzf_root \
     "$_tmp_dir/project-o*/*Docker*/sc" _resolved_root _resolved_query
   [[ $_resolved_root == "$_tmp_dir/project-one" ]] ||
     __fail "unexpected partial fzf root: $_resolved_root"
@@ -367,6 +374,11 @@ function __main() {
   COMPREPLY=()
   __glob_complete_default stat 'project**' stat
   __assert_array 'project-one/read me.txt'
+
+  GLOB_COMPLETE_FZF_TEST_QUERY="'project- "
+  COMPREPLY=()
+  __glob_complete_default stat 'project-*/**' stat
+  __assert_array 'project-one/read\ me.txt'
 
   GLOB_COMPLETE_FZF_TEST_QUERY='split'
   GLOB_COMPLETE_FZF_TEST_SELECTION=$'split\nentry'
