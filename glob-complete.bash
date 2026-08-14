@@ -140,7 +140,11 @@ function __glob_complete_format_candidate() {
   _output=$_candidate
   if [[ -n $_typed_prefix && $_candidate == "$_expanded_prefix"* ]]; then
     _remainder=${_candidate#"$_expanded_prefix"}
-    printf -v _quoted_remainder '%q' "$_remainder"
+    if [[ -n $_remainder ]]; then
+      printf -v _quoted_remainder '%q' "$_remainder"
+    else
+      _quoted_remainder=
+    fi
     _output=$_typed_prefix$_quoted_remainder
     if [[ -d $_candidate ]] &&
       [[ $_quote_as_shell_text == on || $_quoted_remainder != "$_remainder" ]]; then

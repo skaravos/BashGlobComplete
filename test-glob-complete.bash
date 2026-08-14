@@ -397,6 +397,28 @@ function __main() {
   # shellcheck disable=SC2088 # The literal tilde is expected output.
   __assert_array '~/project-one/read\ me.txt'
 
+  GLOB_COMPLETE_FZF_TEST_HEADER="root: $_tmp_dir"
+  GLOB_COMPLETE_FZF_TEST_QUERY=
+  GLOB_COMPLETE_FZF_TEST_ROOT=$_tmp_dir
+  GLOB_COMPLETE_FZF_TEST_SELECTION=$_tmp_dir/
+  COMPREPLY=()
+  # shellcheck disable=SC2088 # The literal tilde is test input.
+  __glob_complete_default stat '~/**' stat
+  # shellcheck disable=SC2088 # The literal tilde is expected output.
+  __assert_array '~'
+
+  COMPREPLY=()
+  # shellcheck disable=SC2016 # The literal parameter expansion is test input.
+  __glob_complete_default stat '$HOME/**' stat
+  # shellcheck disable=SC2016 # The parameter syntax is expected output.
+  __assert_array '$HOME'
+
+  COMPREPLY=()
+  # shellcheck disable=SC2016 # The literal parameter expansion is test input.
+  __glob_complete_default stat '$TEST_GLOB_ROOT/**' stat
+  # shellcheck disable=SC2016 # The parameter syntax is expected output.
+  __assert_array '$TEST_GLOB_ROOT'
+
   GLOB_COMPLETE_FZF_TEST_HEADER='root: .'
   GLOB_COMPLETE_FZF_TEST_MODE=cancel
   GLOB_COMPLETE_FZF_TEST_QUERY=project
