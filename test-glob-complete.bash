@@ -53,7 +53,10 @@ function __main() {
   local _bash_completion=${BASH_COMPLETION_FILE:-/usr/share/bash-completion/bash_completion}
   local _tmp_dir
 
-  unset GLOB_COMPLETE_FIND_COMMAND GLOB_COMPLETE_FZF
+  unset \
+    GLOB_COMPLETE_FIND_COMMAND \
+    GLOB_COMPLETE_FZF \
+    GLOB_COMPLETE_FZF_SKIP
   BASH_COMPLETION_USER_FILE=/dev/null
   shopt -u extglob
   # shellcheck disable=SC1091 # Path is resolved relative to this test script.
@@ -77,20 +80,28 @@ function __main() {
     "$_tmp_dir/project-one/second-Docker-app" \
     "$_tmp_dir/project-one/.vscode" \
     "$_tmp_dir/project-two/.vscode" \
+    "$_tmp_dir/.git/objects" \
     "$_tmp_dir/.hidden" \
     "$_tmp_dir/node_modules/package" \
+    "$_tmp_dir/skip*/child" \
+    "$_tmp_dir/skip-other/child" \
     "$_tmp_dir/tilde-root" \
     "$_tmp_dir/prefix room"
   touch \
     -- \
     "$_tmp_dir/data.txt" \
     "$_tmp_dir/data.log" \
+    "$_tmp_dir/.hidden.txt" \
+    "$_tmp_dir/.git/objects/ignored.txt" \
     "$_tmp_dir/.hidden/ignored.txt" \
     "$_tmp_dir/node_modules/package/ignored.txt" \
+    "$_tmp_dir/skip*/child/ignored.txt" \
+    "$_tmp_dir/skip-other/child/included.txt" \
     "$_tmp_dir/"$'split\nentry' \
     "$_tmp_dir/white room" \
     "$_tmp_dir/"$'key\tword' \
     "$_tmp_dir/project-one/read me.txt" \
+    "$_tmp_dir/project-one/.hidden.txt" \
     "$_tmp_dir/project-two/read me.txt"
   ln -s -- \
     "$_tmp_dir/project-one" \
@@ -104,10 +115,45 @@ function __main() {
   local _found_directory=0
   local _found_excluded_path=0
   local _followed_symlink_cycle=0
+  local _hidden_file_count=0
   local _fzf_candidate
   local _scanner_name
   local _scanner_test_bin=$_tmp_dir/tools
   local -a _arr_fzf_candidates=()
+  local -a _arr_skip_names=()
+  local _skip_value
+
+  __glob_complete_parse_fzf_skip _skip_value _arr_skip_names ||
+    __fail 'could not parse the default fzf skip list'
+  [[ $_skip_value == '.git,node_modules' ]] ||
+    __fail "unexpected default fzf skip list: $_skip_value"
+  [[ ${_arr_skip_names[*]} == '.git node_modules' ]] ||
+    __fail "unexpected parsed default fzf skip list: ${_arr_skip_names[*]}"
+
+  GLOB_COMPLETE_FZF_SKIP=
+  __glob_complete_parse_fzf_skip _skip_value _arr_skip_names ||
+    __fail 'could not parse an empty fzf skip list'
+  [[ -z $_skip_value && ${#_arr_skip_names[@]} == 0 ]] ||
+    __fail 'an empty fzf skip list did not disable exclusions'
+
+  GLOB_COMPLETE_FZF_SKIP='cache,target'
+  __glob_complete_parse_fzf_skip _skip_value _arr_skip_names ||
+    __fail 'could not parse a custom fzf skip list'
+  [[ $_skip_value == 'cache,target' ]] ||
+    __fail "unexpected custom fzf skip list: $_skip_value"
+  [[ ${_arr_skip_names[*]} == 'cache target' ]] ||
+    __fail "unexpected parsed custom fzf skip list: ${_arr_skip_names[*]}"
+
+  GLOB_COMPLETE_FZF_SKIP='cache,,target'
+  if __glob_complete_parse_fzf_skip _skip_value _arr_skip_names; then
+    __fail 'an fzf skip list with an empty entry was accepted'
+  fi
+  GLOB_COMPLETE_FZF_SKIP='cache/nested'
+  if __glob_complete_parse_fzf_skip _skip_value _arr_skip_names; then
+    __fail 'an fzf skip list with a slash was accepted'
+  fi
+  unset GLOB_COMPLETE_FZF_SKIP
+
   GLOB_COMPLETE_FIND_COMMAND=bash
   __glob_complete_select_find_command _find_backend _find_command ||
     __fail 'could not select the explicit Bash candidate scanner'
@@ -115,20 +161,146 @@ function __main() {
     __fail "unexpected explicit scanner: $_find_backend [$_find_command]"
   readarray -d '' -t _arr_fzf_candidates < <(
     __glob_complete_generate_fzf_candidates \
-      txt "$_tmp_dir" "$_find_backend" "$_find_command"
+      txt "$_tmp_dir" "$_find_backend" "$_find_command" \
+      off .git node_modules
   )
   for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
     case $_fzf_candidate in
       "$_tmp_dir/data.txt") _found_data_txt=1 ;;
       "$_tmp_dir/project-one/") _found_directory=1 ;;
-      */.hidden/*|*/node_modules/*) _found_excluded_path=1 ;;
+      "$_tmp_dir/.hidden.txt"|"$_tmp_dir/project-one/.hidden.txt")
+        _hidden_file_count=$((_hidden_file_count + 1))
+        ;;
+      */.git/*|*/.hidden/*|*/node_modules/*) _found_excluded_path=1 ;;
       */cycle/?*) _followed_symlink_cycle=1 ;;
     esac
   done
   ((_found_data_txt)) || __fail 'Bash scanner omitted a matching file'
   ((_found_directory)) || __fail 'Bash scanner omitted a directory'
+  ((_hidden_file_count == 2)) ||
+    __fail 'Bash scanner omitted a hidden file in a visible directory'
   ((! _found_excluded_path)) || __fail 'Bash scanner included an excluded path'
   ((! _followed_symlink_cycle)) || __fail 'Bash scanner followed a directory symlink'
+
+  local _found_hidden_descendant=0
+  readarray -d '' -t _arr_fzf_candidates < <(
+    __glob_complete_generate_fzf_candidates \
+      txt "$_tmp_dir" "$_find_backend" "$_find_command" \
+      on .git node_modules
+  )
+  for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+    case $_fzf_candidate in
+      "$_tmp_dir/.hidden/ignored.txt") _found_hidden_descendant=1 ;;
+      */.git/*|*/node_modules/*)
+        __fail 'Bash scanner ignored the default skip list'
+        ;;
+    esac
+  done
+  ((_found_hidden_descendant)) ||
+    __fail 'Bash scanner did not traverse a hidden directory'
+
+  local _found_default_directory=0
+  local _found_custom_skip=0
+  readarray -d '' -t _arr_fzf_candidates < <(
+    __glob_complete_generate_fzf_candidates \
+      txt "$_tmp_dir" "$_find_backend" "$_find_command" \
+      on project-one
+  )
+  for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+    case $_fzf_candidate in
+      */project-one/*) _found_custom_skip=1 ;;
+      */.git/*|*/node_modules/*) _found_default_directory=1 ;;
+    esac
+  done
+  ((! _found_custom_skip)) || __fail 'Bash scanner ignored a custom skip list'
+  ((_found_default_directory)) ||
+    __fail 'a custom skip list did not replace the defaults'
+
+  local _scanner_backend
+  local _scanner_command
+  local _scanner_index
+  local _saw_hidden_descendant
+  local _saw_hidden_file
+  local _saw_literal_skip
+  local _saw_skip_neighbor
+  local _saw_skipped_descendant
+  local -a _arr_scanner_backends=(find)
+  local -a _arr_scanner_commands=(find)
+  if _scanner_command=$(type -P -- fdfind 2>/dev/null); then
+    _arr_scanner_backends+=(fd)
+    _arr_scanner_commands+=("$_scanner_command")
+  elif _scanner_command=$(type -P -- fd 2>/dev/null); then
+    _arr_scanner_backends+=(fd)
+    _arr_scanner_commands+=("$_scanner_command")
+  fi
+
+  for _scanner_index in "${!_arr_scanner_backends[@]}"; do
+    _scanner_backend=${_arr_scanner_backends[_scanner_index]}
+    _scanner_command=${_arr_scanner_commands[_scanner_index]}
+    _saw_hidden_descendant=0
+    _saw_hidden_file=0
+    readarray -d '' -t _arr_fzf_candidates < <(
+      __glob_complete_generate_fzf_paths \
+        "$_scanner_backend" "$_scanner_command" "$_tmp_dir" \
+        off .git node_modules
+    )
+    for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+      case ${_fzf_candidate%/} in
+        "$_tmp_dir/.hidden.txt"|"$_tmp_dir/project-one/.hidden.txt")
+          _saw_hidden_file=1
+          ;;
+        "$_tmp_dir/.hidden"|"$_tmp_dir/.hidden/"*)
+          _saw_hidden_descendant=1
+          ;;
+      esac
+    done
+    ((_saw_hidden_file)) ||
+      __fail "$_scanner_backend scanner omitted a hidden file"
+    ((! _saw_hidden_descendant)) ||
+      __fail "$_scanner_backend scanner traversed a hidden directory"
+
+    _saw_hidden_descendant=0
+    _saw_skipped_descendant=0
+    readarray -d '' -t _arr_fzf_candidates < <(
+      __glob_complete_generate_fzf_paths \
+        "$_scanner_backend" "$_scanner_command" "$_tmp_dir" \
+        on .git node_modules
+    )
+    for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+      case ${_fzf_candidate%/} in
+        "$_tmp_dir/.hidden"|"$_tmp_dir/.hidden/"*)
+          _saw_hidden_descendant=1
+          ;;
+        "$_tmp_dir/.git/"*|"$_tmp_dir/node_modules/"*)
+          _saw_skipped_descendant=1
+          ;;
+      esac
+    done
+    ((_saw_hidden_descendant)) ||
+      __fail "$_scanner_backend scanner did not traverse a hidden directory"
+    ((! _saw_skipped_descendant)) ||
+      __fail "$_scanner_backend scanner ignored the default skip list"
+
+    _saw_literal_skip=0
+    _saw_skip_neighbor=0
+    readarray -d '' -t _arr_fzf_candidates < <(
+      __glob_complete_generate_fzf_paths \
+        "$_scanner_backend" "$_scanner_command" "$_tmp_dir" \
+        on 'skip*'
+    )
+    for _fzf_candidate in "${_arr_fzf_candidates[@]}"; do
+      case ${_fzf_candidate%/} in
+        "$_tmp_dir/skip*"|"$_tmp_dir/skip*/"*) _saw_literal_skip=1 ;;
+        "$_tmp_dir/skip-other"|"$_tmp_dir/skip-other/"*)
+          _saw_skip_neighbor=1
+          ;;
+      esac
+    done
+    ((! _saw_literal_skip)) ||
+      __fail "$_scanner_backend scanner treated a literal skip as a candidate"
+    ((_saw_skip_neighbor)) ||
+      __fail "$_scanner_backend scanner treated a skip name as a glob"
+  done
   unset GLOB_COMPLETE_FIND_COMMAND
 
   mkdir -p -- "$_scanner_test_bin"
@@ -337,6 +509,7 @@ function __main() {
     '_read_stdin=0' \
     '_root=' \
     '_walker=' \
+    '_walker_skip=' \
     'while (($#)); do' \
     '  case $1 in' \
     '    --header) _header=$2; shift 2 ;;' \
@@ -344,6 +517,7 @@ function __main() {
     '    --read0) _read_stdin=1; shift ;;' \
     '    --walker-root) _root=$2; shift 2 ;;' \
     '    --walker=*) _walker=${1#--walker=}; shift ;;' \
+    '    --walker-skip=*) _walker_skip=${1#--walker-skip=}; shift ;;' \
     '    *) shift ;;' \
     '  esac' \
     'done' \
@@ -351,13 +525,18 @@ function __main() {
     '[[ $_query == "${GLOB_COMPLETE_FZF_TEST_QUERY-}" ]] || exit 2' \
     '[[ $_root == "${GLOB_COMPLETE_FZF_TEST_ROOT-}" ]] || exit 2' \
     '[[ $_walker == "${GLOB_COMPLETE_FZF_TEST_WALKER-}" ]] || exit 2' \
+    '[[ $_walker_skip == "${GLOB_COMPLETE_FZF_TEST_WALKER_SKIP-}" ]] || exit 2' \
     'case ${GLOB_COMPLETE_FZF_TEST_MODE-} in' \
     '  cancel) exit 130 ;;' \
     '  error) exit 2 ;;' \
     'esac' \
     '[[ -n ${GLOB_COMPLETE_FZF_TEST_SELECTION-} ]] || exit 2' \
     'if ((_read_stdin)); then' \
-    '  while IFS= read -r -d "" _candidate; do :; done' \
+    '  _selection_found=0' \
+    '  while IFS= read -r -d "" _candidate; do' \
+    '    [[ $_candidate == "$GLOB_COMPLETE_FZF_TEST_SELECTION" ]] && _selection_found=1' \
+    '  done' \
+    '  ((_selection_found)) || exit 2' \
     'fi' \
     'printf "%s\\0" "$GLOB_COMPLETE_FZF_TEST_SELECTION"' \
     > "$_fzf_bin_dir/fzf"
@@ -371,9 +550,35 @@ function __main() {
   export GLOB_COMPLETE_FZF_TEST_ROOT=.
   export GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/read me.txt'
   export GLOB_COMPLETE_FZF_TEST_WALKER=file,dir,follow
+  export GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=.git,node_modules
   COMPREPLY=()
   __glob_complete_default stat 'project**' stat
   __assert_array 'project-one/read me.txt'
+
+  GLOB_COMPLETE_FZF_TEST_QUERY=
+  GLOB_COMPLETE_FZF_TEST_SELECTION='.hidden/ignored.txt'
+  GLOB_COMPLETE_FZF_TEST_WALKER=file,dir,follow,hidden
+  COMPREPLY=()
+  __glob_complete_default stat './***' stat
+  __assert_array '.hidden/ignored.txt'
+
+  GLOB_COMPLETE_FZF_SKIP='project-one'
+  GLOB_COMPLETE_FZF_TEST_QUERY=project
+  GLOB_COMPLETE_FZF_TEST_SELECTION='project-two/read me.txt'
+  GLOB_COMPLETE_FZF_TEST_WALKER=file,dir,follow
+  GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=project-one
+  COMPREPLY=()
+  __glob_complete_default stat 'project**' stat
+  __assert_array 'project-two/read me.txt'
+
+  GLOB_COMPLETE_FZF_SKIP=
+  GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/read me.txt'
+  GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=
+  COMPREPLY=()
+  __glob_complete_default stat 'project**' stat
+  __assert_array 'project-one/read me.txt'
+  unset GLOB_COMPLETE_FZF_SKIP
+  GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=.git,node_modules
 
   GLOB_COMPLETE_FZF_TEST_QUERY="'project- "
   COMPREPLY=()
@@ -451,7 +656,8 @@ function __main() {
     GLOB_COMPLETE_FZF_TEST_QUERY \
     GLOB_COMPLETE_FZF_TEST_ROOT \
     GLOB_COMPLETE_FZF_TEST_SELECTION \
-    GLOB_COMPLETE_FZF_TEST_WALKER
+    GLOB_COMPLETE_FZF_TEST_WALKER \
+    GLOB_COMPLETE_FZF_TEST_WALKER_SKIP
 
   if [[ ! -r $_bash_completion ]]; then
     __print_warn "not found: $_bash_completion; skipping bash-completion integration tests"
@@ -476,6 +682,7 @@ function __main() {
   export GLOB_COMPLETE_FZF_TEST_ROOT=.
   export GLOB_COMPLETE_FZF_TEST_SELECTION='project-one/'
   export GLOB_COMPLETE_FZF_TEST_WALKER=dir,follow
+  export GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=.git,node_modules
   cur='project**'
   COMPREPLY=()
   _comp_compgen_filedir -d || true
@@ -492,6 +699,23 @@ function __main() {
   _comp_compgen_filedir txt || true
   __assert_array 'project-one/read me.txt'
 
+  GLOB_COMPLETE_FZF_TEST_HEADER='root: .'
+  GLOB_COMPLETE_FZF_TEST_QUERY=
+  GLOB_COMPLETE_FZF_TEST_ROOT=
+  GLOB_COMPLETE_FZF_TEST_SELECTION='.hidden/ignored.txt'
+  cur='./***'
+  COMPREPLY=()
+  _comp_compgen_filedir txt || true
+  __assert_array '.hidden/ignored.txt'
+
+  GLOB_COMPLETE_FZF_SKIP=
+  GLOB_COMPLETE_FZF_TEST_SELECTION='.git/objects/ignored.txt'
+  GLOB_COMPLETE_FZF_TEST_WALKER_SKIP=
+  COMPREPLY=()
+  _comp_compgen_filedir txt || true
+  __assert_array '.git/objects/ignored.txt'
+  unset GLOB_COMPLETE_FZF_SKIP
+
   PATH=$_original_path
   unset \
     GLOB_COMPLETE_FZF \
@@ -501,7 +725,8 @@ function __main() {
     GLOB_COMPLETE_FZF_TEST_QUERY \
     GLOB_COMPLETE_FZF_TEST_ROOT \
     GLOB_COMPLETE_FZF_TEST_SELECTION \
-    GLOB_COMPLETE_FZF_TEST_WALKER
+    GLOB_COMPLETE_FZF_TEST_WALKER \
+    GLOB_COMPLETE_FZF_TEST_WALKER_SKIP
 
   cur='*a'
   COMPREPLY=()

@@ -207,23 +207,77 @@ function __glob_complete_select_find_command() {
   _backend_output=bash
 }
 
+function __glob_complete_parse_fzf_skip() {
+  local _skip_value_name=$1
+  local _skip_names_name=$2
+  local _configured_skip=${GLOB_COMPLETE_FZF_SKIP-.git,node_modules}
+  local _remainder
+  local _skip_name
+  local -n _skip_value_output=$_skip_value_name
+  local -n _arr_skip_names_output=$_skip_names_name
+
+  _skip_value_output=
+  _arr_skip_names_output=()
+  [[ -n $_configured_skip ]] || return 0
+  case $_configured_skip in
+    ,*|*,|*,,*) return 1 ;;
+  esac
+
+  _remainder=$_configured_skip
+  while [[ $_remainder == *,* ]]; do
+    _arr_skip_names_output+=("${_remainder%%,*}")
+    _remainder=${_remainder#*,}
+  done
+  _arr_skip_names_output+=("$_remainder")
+  for _skip_name in "${_arr_skip_names_output[@]}"; do
+    [[ -n $_skip_name && $_skip_name != */* ]] || return 1
+  done
+  _skip_value_output=$_configured_skip
+}
+
+function __glob_complete_escape_glob() {
+  local _value=$1
+  local _output_name=$2
+  local _escaped_value
+  local -n _output=$_output_name
+
+  _escaped_value=${_value//\\/\\\\}
+  _escaped_value=${_escaped_value//\*/\\*}
+  _escaped_value=${_escaped_value//\?/\\?}
+  _escaped_value=${_escaped_value//\[/\\[}
+  _escaped_value=${_escaped_value//\]/\\]}
+  _escaped_value=${_escaped_value//\{/\\\{}
+  _escaped_value=${_escaped_value//\}/\\\}}
+  _escaped_value=${_escaped_value//!/\\!}
+  _output=$_escaped_value
+}
+
 function __glob_complete_generate_bash_fzf_paths() {
   local _root=$1
   local _type=${2-all}
+  local _traverse_hidden=${3-off}
+  local -a _arr_skip_names=("${@:4}")
 
   (
-    shopt -s nullglob
-    shopt -u dotglob
+    shopt -s dotglob nullglob
 
     function __glob_complete_walk_bash_fzf_directory() {
       local _directory=$1
+      local _basename
       local _candidate
+      local _skip_candidate
 
       for _candidate in "${_directory%/}"/*; do
         [[ -e $_candidate || -L $_candidate ]] || continue
-        case ${_candidate##*/} in
-          .git|node_modules) continue ;;
-        esac
+        _basename=${_candidate##*/}
+        if [[ -d $_candidate ]]; then
+          for _skip_candidate in "${_arr_skip_names[@]}"; do
+            [[ $_basename == "$_skip_candidate" ]] && continue 2
+          done
+          if [[ $_traverse_hidden == off && $_basename == .* ]]; then
+            continue
+          fi
+        fi
         if [[ $_type != directory || -d $_candidate ]]; then
           printf '%s\0' "$_candidate"
         fi
@@ -241,25 +295,52 @@ function __glob_complete_generate_fzf_paths() {
   local _backend=$1
   local _command=$2
   local _root=$3
+  local _traverse_hidden=${4-off}
+  local _escaped_skip_name
+  local _skip_name
+  local -a _arr_find_args=(-L "$_root" -mindepth 1)
+  local -a _arr_fd_args=(
+    --color=never
+    --follow
+    --hidden
+    --no-ignore
+  )
+  local -a _arr_prune_predicates=()
+  local -a _arr_skip_names=("${@:5}")
 
   case $_backend in
     find)
-      command "$_command" -L "$_root" -mindepth 1 \
-        \( -name .git -o -name node_modules -o -name '.*' \) -prune -o \
-        \( -type d -o -type f -o -type l \) -print0 2>/dev/null
+      for _skip_name in "${_arr_skip_names[@]}"; do
+        __glob_complete_escape_glob "$_skip_name" _escaped_skip_name
+        _arr_prune_predicates+=(-name "$_escaped_skip_name" -o)
+      done
+      if [[ $_traverse_hidden == off ]]; then
+        _arr_prune_predicates+=(-name '.*' -o)
+      fi
+      if ((${#_arr_prune_predicates[@]})); then
+        unset '_arr_prune_predicates[-1]'
+        _arr_find_args+=(
+          \( -type d \( "${_arr_prune_predicates[@]}" \) \) -prune -o
+        )
+      fi
+      _arr_find_args+=(\( -type d -o -type f -o -type l \) -print0)
+      command "$_command" "${_arr_find_args[@]}" 2>/dev/null
       ;;
     fd)
+      if [[ $_traverse_hidden == off ]]; then
+        _arr_fd_args+=(--exclude '.*/')
+      fi
+      for _skip_name in "${_arr_skip_names[@]}"; do
+        __glob_complete_escape_glob "$_skip_name" _escaped_skip_name
+        _arr_fd_args+=(--exclude "$_escaped_skip_name/")
+      done
+      _arr_fd_args+=(--print0 . "$_root")
       command "$_command" \
-        --color=never \
-        --follow \
-        --no-ignore \
-        --exclude .git \
-        --exclude node_modules \
-        --print0 \
-        . "$_root" 2>/dev/null
+        "${_arr_fd_args[@]}" 2>/dev/null
       ;;
     bash)
-      __glob_complete_generate_bash_fzf_paths "$_root"
+      __glob_complete_generate_bash_fzf_paths \
+        "$_root" all "$_traverse_hidden" "${_arr_skip_names[@]}"
       ;;
     *) return 1 ;;
   esac
@@ -270,6 +351,7 @@ function __glob_complete_generate_fzf_candidates() {
   local _root=$2
   local _backend=$3
   local _command=${4-}
+  local _traverse_hidden=${5-off}
   local _fzf_candidate
   local _fzf_display_candidate
   local _xspec="*.@($_filedir_filter|${_filedir_filter^^})"
@@ -292,7 +374,7 @@ function __glob_complete_generate_fzf_candidates() {
       printf '%s\0' "$_fzf_display_candidate"
     done < <(
       __glob_complete_generate_fzf_paths \
-        "$_backend" "$_command" "$_root"
+        "$_backend" "$_command" "$_root" "$_traverse_hidden" "${@:6}"
     )
   )
 }
@@ -507,7 +589,11 @@ function __glob_complete_collect_fzf() {
   local _query
   local _quote_as_shell_text=off
   local _root
+  local _skip_value
+  local _traverse_hidden=off
+  local _trigger_length=2
   local _typed_prefix
+  local _walker_hidden=
   local -a _arr_fzf_args=(
     '--height=40%'
     '--header-first'
@@ -515,8 +601,8 @@ function __glob_complete_collect_fzf() {
     '--print0'
     '--reverse'
     '--scheme=path'
-    '--walker-skip=.git,node_modules'
   )
+  local -a _arr_skip_names=()
   local -a _arr_selected=()
   local -n _arr_output=$_output_name
   local -n _state_output=$_state_name
@@ -525,24 +611,39 @@ function __glob_complete_collect_fzf() {
   _state_output=inactive
   [[ -n ${GLOB_COMPLETE_FZF-} && $_word == *'**' ]] || return 1
   command -v fzf >/dev/null 2>&1 || return 1
+  __glob_complete_parse_fzf_skip _skip_value _arr_skip_names || return 1
 
-  _base=${_word:0:${#_word}-2}
+  if [[ $_word == *'***' ]]; then
+    _traverse_hidden=on
+    _trigger_length=3
+  fi
+
+  _base=${_word:0:${#_word}-_trigger_length}
   __glob_complete_expand_prefix \
     "$_base" _expanded_base _expanded_prefix _typed_prefix ||
     _expanded_base=$_base
 
   __glob_complete_resolve_fzf_root "$_expanded_base" _root _query
-  _arr_fzf_args+=(--header "root: $_root" --query "$_query")
+  _arr_fzf_args+=(
+    --header "root: $_root"
+    --query "$_query"
+    "--walker-skip=$_skip_value"
+  )
+
+  [[ $_traverse_hidden == on ]] && _walker_hidden=,hidden
 
   if [[ $_filedir_filter == '-d' ]]; then
     # use fzf's native walker to find directories only.
-    _arr_fzf_args+=('--walker=dir,follow' --walker-root "$_root")
+    echo "using native fzf walker (dir-only) on '$_root'" >> "/tmp/prompt.log"
+    _arr_fzf_args+=("--walker=dir,follow$_walker_hidden" --walker-root "$_root")
   elif [[ -z $_filedir_filter ]]; then
     # use fzf's native walker to find both files and directories.
-    _arr_fzf_args+=('--walker=file,dir,follow' --walker-root "$_root")
+    echo "using native fzf walker on '$_root'" >> "/tmp/prompt.log"
+    _arr_fzf_args+=("--walker=file,dir,follow$_walker_hidden" --walker-root "$_root")
   else
     # use a separate scanner to find only items matching an extension filter
     __glob_complete_select_find_command _find_backend _find_command || return 1
+    echo "using separate scanner on '$_root': $_find_command" >> "/tmp/prompt.log"
     _arr_fzf_args+=(--read0)
   fi
 
@@ -554,7 +655,8 @@ function __glob_complete_collect_fzf() {
   else
     readarray -d '' -t _arr_selected < <(
       __glob_complete_generate_fzf_candidates \
-        "$_filedir_filter" "$_root" "$_find_backend" "$_find_command" |
+        "$_filedir_filter" "$_root" "$_find_backend" "$_find_command" \
+        "$_traverse_hidden" "${_arr_skip_names[@]}" |
         (
           unset FZF_DEFAULT_COMMAND FZF_DEFAULT_OPTS_FILE
           command fzf "${_arr_fzf_args[@]}" 2>/dev/null

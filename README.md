@@ -69,7 +69,7 @@ Array and nameref variables are not expanded.
 ## Optional fzf picker
 
 Set `GLOB_COMPLETE_FZF` to any non-empty value to use `fzf` when the word being
-completed ends in `**`:
+completed ends in `**` or `***`:
 
 ```bash
 export GLOB_COMPLETE_FZF=1
@@ -81,7 +81,12 @@ For example:
 ```text
 cd proj**<Tab>
 less src/mai**<Tab>
+stat ./***<Tab>
 ```
+
+The `**` suffix lists hidden files in visible directories but does not list or
+traverse hidden directories. Add a third asterisk to list and traverse hidden
+directories as well.
 
 Directory components are resolved from left to right for as long as each one
 identifies a single directory. Literal parts of unresolved directory components
@@ -100,10 +105,28 @@ particular extensions, candidate paths are collected using the first available
 scanner in this order: `find`, `fdfind`, `fd`, and finally a pure Bash
 implementation. Directories remain candidates, but files with other extensions
 are omitted. The pure Bash fallback does not follow directory symlinks, which
-avoids cycles without requiring an external path-resolution command. All paths
-exclude hidden entries and skip `.git` and `node_modules` directories. The
-selected path replaces the word being completed. Leading variable and tilde
-prefixes are preserved, just as they are during ordinary glob completion.
+avoids cycles without requiring an external path-resolution command. All
+scanners apply the same hidden-directory mode and configured directory skip
+list. The selected path replaces the word being completed. Leading variable
+and tilde prefixes are preserved, just as they are during ordinary glob
+completion.
+
+Set `GLOB_COMPLETE_FZF_SKIP` in the current shell to a comma-separated list of
+directory names that the picker should not traverse. When the variable is unset,
+it defaults to fzf's normal `.git,node_modules` skip list. Any custom list
+replaces that default and an explicitly empty value can be used to disable
+all directory exclusions:
+
+```bash
+export GLOB_COMPLETE_FZF_SKIP='.git,node_modules,__pycache__,venv'
+# set to an empty string will prevent fzf from skipping any directories
+export GLOB_COMPLETE_FZF_SKIP=''
+```
+
+Each entry must be a literal directory basename rather than a path, so `/` is
+not allowed. Empty entries in a non-empty list are also considered invalid.
+An invalid value anywhere in the skip list makes the picker silently fall back
+to ordinary glob completion for that attempt.
 
 Set `GLOB_COMPLETE_FIND_COMMAND` to bypass automatic scanner selection. It
 accepts `find`, `fd` (including its `fdfind` executable name), `bash`, or a path
