@@ -1,35 +1,37 @@
-# Glob-aware completion for Bash
+# Glob completion for Bash
 
-Use wildcard patterns to find files and directories with Tab.
-[`glob-complete.bash`](./glob-complete.bash) adds glob matching to Bash filename
-completion: type `cd *a`, press Tab, and get matches such as `bar/` and `baz/`.
+Use wildcard patterns to find files and directories with the Tab key.
+[`glob-complete.bash`](./glob-complete.bash) adds glob completion to Bash filename
+completion. For example, `cd *a` can give the matches `bar/` and `baz/`.
 
-The script works on its own or with
+The script operates independently or with
 [bash-completion](https://github.com/scop/bash-completion). With bash-completion,
-commands keep their usual completion rules, such as suggesting only directories
-for `cd` or only files with certain extensions.
+commands keep their usual completion rules. For example, `cd` gives only directories.
+Other commands can limit files to specified extensions.
 
-## Setup
+## Set up the script
 
-Add this line to your `~/.bashrc`, replacing the path with the script's actual
-location:
+1. In `~/.bashrc`, add the line below.
+2. Replace `/path/to/BashGlobComplete` with the directory that contains the script.
 
 ```bash
 . /path/to/BashGlobComplete/glob-complete.bash
 ```
 
-You can source the script before or after bash-completion. If bash-completion
-is loaded again later, the script restores its integration automatically. Any
-existing `BASH_COMPLETION_USER_FILE` is preserved and sourced as usual.
+You can load the script before or after bash-completion. If bash-completion loads
+again, the script automatically restores the integration. The script keeps any
+existing `BASH_COMPLETION_USER_FILE` and loads that file as usual.
 
-Integration with bash-completion requires version 2.12 or newer. If you don't
-use bash-completion, the script provides completion for commands that don't
-already have a completer.
+Integration with bash-completion requires version 2.12 or newer. Without
+bash-completion, the script supplies completion for commands that have no completion
+function.
 
 ## Complete a path
 
-Type a Bash glob wherever filename completion is available, then press Tab.
-In these examples, `<Tab>` means pressing the Tab key:
+1. Where filename completion is available, type a Bash glob.
+2. Press Tab.
+
+In these examples, `<Tab>` identifies the Tab key:
 
 ```text
 cd *a<Tab>
@@ -37,7 +39,7 @@ rm report-202?-*.pdf<Tab>
 less src/[ch]*/main.*<Tab>
 ```
 
-Variable and tilde prefixes stay as you typed them:
+The script keeps variable and tilde prefixes unchanged:
 
 ```text
 cd $HOME/proj*<Tab>
@@ -45,41 +47,48 @@ cd ${HOME}/proj*<Tab>
 cd ~/proj*<Tab>
 ```
 
-For example, a match for `$HOME/proj*` is inserted as `$HOME/project/`, keeping
-`$HOME` in the command line. Special characters elsewhere in the path are
-escaped. Array and nameref variables are not expanded.
+For example, the script can insert `$HOME/project/` for `$HOME/proj*`.
+The command line keeps the `$HOME` prefix. The script adds escape characters to
+special characters elsewhere in the path. The script does not expand array or
+nameref variables.
 
-### Extended patterns and case-insensitive matching
+### Use extended patterns
 
-Enable Bash's `extglob` option to use extended patterns:
+1. To use extended patterns, enable the Bash `extglob` option.
 
 ```bash
 shopt -s extglob
 ```
 
-You can then complete patterns such as:
+With this option, you can complete patterns such as:
 
 ```text
 cd @(build|dist)<Tab>
 ```
 
-To make matching case-insensitive, enable `nocaseglob`:
+### Ignore letter case
+
+1. To ignore letter case in glob matches, enable `nocaseglob`.
 
 ```bash
 shopt -s nocaseglob
 ```
 
-## Pick a path with fzf
+## Select a path with fzf
 
-If you have `fzf` installed, you can use an interactive picker to search below
-a directory. Enable it by setting `GLOB_COMPLETE_FZF` to any non-empty value:
+The fzf path selector lets you search below a directory. This feature requires
+`fzf`.
+
+1. Set `GLOB_COMPLETE_FZF` to a value that is not empty.
+2. Load the script.
 
 ```bash
 export GLOB_COMPLETE_FZF=1
 . /path/to/BashGlobComplete/glob-complete.bash
 ```
 
-End the word with `**` or `***`, then press Tab to open the picker:
+1. At the end of the word, type `**` or `***`.
+2. To open the path selector, press Tab.
 
 ```text
 cd proj**<Tab>
@@ -87,119 +96,139 @@ less src/mai**<Tab>
 stat ./***<Tab>
 ```
 
-| Suffix | What the picker searches |
+| Suffix | Search contents |
 | --- | --- |
-| `**` | Files and visible directories, including hidden files inside visible directories. Hidden directories are excluded. |
-| `***` | Files and directories, including hidden directories and their contents. |
+| `**` | Files and visible directories. This includes hidden files in visible directories, but not hidden directories. |
+| `***` | Files and directories. This includes hidden directories and their contents. |
 
-The picker shows the search root in a fixed header. Select a path to replace
-the word being completed; variable and tilde prefixes are preserved.
-Press Escape or Ctrl-C to leave the command line unchanged.
+The path selector shows the search root in a fixed header. The script keeps
+variable and tilde prefixes unchanged.
 
-When bash-completion is active, the picker follows its directory-only and
-file-extension filters. Without bash-completion, it offers both files and
-directories because it has no command-specific context.
+1. To replace the word, select a path.
 
-If `fzf` is missing or cannot start with the required options, the script falls
-back silently to ordinary glob completion. You don't need fzf's shell
-integration; using `eval "$(fzf --bash)"` alongside this feature is not
-recommended.
+To keep the command line unchanged, use this step instead:
 
-### Choose which directories to skip
+1. Press Escape or Ctrl-C.
 
-By default, the picker skips `.git` and `node_modules`. Set
-`GLOB_COMPLETE_FZF_SKIP` to a comma-separated list to replace those defaults:
+With bash-completion, the path selector obeys the directory-only and file-extension
+filters. Without bash-completion, the path selector shows files and directories.
+The script has no command-specific information in this mode.
+
+If `fzf` is absent or cannot start with the necessary options, the script uses
+ordinary glob completion without a message. This feature does not require the fzf
+shell integration. Do not use `eval "$(fzf --bash)"` with this feature.
+
+### Exclude directories from the search
+
+By default, the path selector excludes `.git` and `node_modules`.
+
+1. To replace the defaults, set `GLOB_COMPLETE_FZF_SKIP` to a list of directory names
+   separated by commas.
 
 ```bash
 export GLOB_COMPLETE_FZF_SKIP='.git,node_modules,__pycache__,venv'
 ```
 
-To allow searching all directories, set it to an empty string:
+To search all directories, use this step instead:
+
+1. Set `GLOB_COMPLETE_FZF_SKIP` to an empty string.
 
 ```bash
 export GLOB_COMPLETE_FZF_SKIP=''
 ```
 
-Use directory names only, not paths or patterns. Entries cannot contain `/`,
-and a non-empty list cannot contain empty entries. If any entry is invalid,
-the picker silently falls back to ordinary glob completion for that attempt.
+Use only directory names in the list. Do not use paths or patterns. Entries cannot
+contain `/`. A list that is not empty cannot contain empty entries. If an entry is
+invalid, the script uses ordinary glob completion for that attempt without a message.
 
-### How a pattern becomes a search
+### Convert a pattern to a search query
 
-The script reads the path from left to right, using each directory component
-that resolves to exactly one directory to narrow the search root. The remaining
-components become the initial fzf query:
+The script reads the path from left to right. Each directory component that matches
+exactly one directory limits the search root. The script converts the remaining
+components to the initial fzf query:
 
 - Literal text in unresolved directory components becomes an exact-match term.
-- The final component becomes a fuzzy-search term.
+- The last component becomes a fuzzy-search term.
 
-For example, suppose `~/proj*` matches only `~/projects`. Completing
-`~/proj*/*Docker*/sc**` searches below `~/projects` with the query `'Docker sc`.
-The leading single quote tells fzf to match `Docker` exactly, while `sc` uses
-normal fuzzy matching.
+For example, assume that `~/proj*` matches only `~/projects`.
+For `~/proj*/*Docker*/sc**`, the script searches below `~/projects` with the query
+`'Docker sc`. The initial single quote tells fzf to match `Docker` exactly.
+The term `sc` uses fuzzy matching.
 
-If the final component is empty, the query ends with a space so that anything
-you type starts a new fuzzy-search term.
+If the last component is empty, the query ends with a space. Text that you type
+then starts a new fuzzy-search term.
 
-### Advanced: choose a file scanner
+### Select a file scanner
 
-For directory-only searches and searches without extension restrictions, the
-picker uses fzf's built-in filesystem walker. When bash-completion limits files
-to particular extensions, the script uses the first available scanner in this
-order: `find`, `fdfind`, `fd`, then a pure Bash fallback. Directories are still
-offered, but files with other extensions are omitted.
+For directory-only searches, the path selector uses the built-in fzf filesystem
+walker. The path selector also uses this walker for searches without file-extension
+restrictions.
 
-All scanners respect the `**` or `***` hidden-directory choice and the directory
-skip list. The pure Bash fallback does not follow directory symlinks, avoiding
-cycles without an external path-resolution command.
+With file-extension restrictions from bash-completion, the script uses the first
+available scanner in this order:
 
-To choose a scanner yourself, set `GLOB_COMPLETE_FIND_COMMAND`:
+1. `find`
+2. `fdfind`
+3. `fd`
+4. The Bash scanner
+
+The path selector still shows directories. The path selector does not show files
+with other extensions.
+
+All scanners obey the `**` or `***` choice for hidden directories. All scanners also
+obey the list of directories to exclude. The Bash scanner does not follow directory
+symlinks. This prevents cycles without an external command for path resolution.
+
+1. To select a scanner, set `GLOB_COMPLETE_FIND_COMMAND`.
 
 ```bash
 export GLOB_COMPLETE_FIND_COMMAND=bash
 ```
 
-Accepted values are `find`, `fd`, `fdfind`, `bash`, or a path to one of those
-external commands. This setting applies to searches with extension restrictions.
-If the chosen command is unsupported or unavailable, those requests silently
-fall back to ordinary glob completion.
+Permitted values are `find`, `fd`, `fdfind`, `bash`, or a path to one of those external
+commands. This setting applies only to searches with file-extension restrictions.
+If the selected command is unsupported or unavailable, the script uses ordinary
+glob completion for those requests without a message.
 
-## Make completion lists easier to read
+## Show shorter completion lists
 
-When a glob appears in a directory component, Readline's `possible-completions`
-command lists the full matching paths. This helps distinguish matches that
-share a filename. For example, `~/projects/*/.vscode` may display:
+When a directory component contains a glob, the Readline `possible-completions`
+command shows the full paths of matches. Full paths help you identify matches with
+the same filename. For example, `~/projects/*/.vscode` can show:
 
 ```text
 ~/projects/foo/.vscode/  ~/projects/bar/.vscode/
 ```
 
-To shorten repeated prefixes, add this to `~/.inputrc`:
+1. To shorten repeated prefixes, add this line to `~/.inputrc`.
 
 ```inputrc
 set completion-prefix-display-length 1
 ```
 
-The same list would then look like this:
+The list then has this form:
 
 ```text
 ...foo/.vscode/  ...bar/.vscode/
 ```
 
-This setting affects all completion lists. The number is the longest common
-prefix Readline will show without abbreviating it. Any value above zero enables
-abbreviation; `1` shortens nearly every nontrivial common prefix.
+This setting affects all completion lists. The number specifies the maximum length
+of a common prefix that Readline shows in full. A value above zero enables prefix
+abbreviation. The value `1` shortens almost all common prefixes longer than one
+character.
 
-To try it in the current shell first, run:
+1. To test the setting in the current shell, run this command.
 
 ```bash
 bind 'set completion-prefix-display-length 1'
 ```
 
-## Cycle through matches with Tab
+## Select matches with Tab
 
-To have Tab select one match at a time and Shift-Tab move backwards, add these
-bindings to `~/.bashrc` after sourcing the script:
+These key bindings let Tab select one match at a time. Shift-Tab selects the
+previous match.
+
+1. In `~/.bashrc`, add these key bindings after the line that loads the script.
 
 ```bash
 bind 'set menu-complete-display-prefix on'
@@ -208,25 +237,46 @@ bind '"\e[Z": menu-complete-backward'
 ```
 
 After the last match, Readline briefly returns to the original text or common
-prefix before cycling again. For `bar/` and `baz/`, you may see the sequence
-`bar/`, `baz/`, `ba`, `bar/`. This is built-in Readline behavior and cannot be
-changed by a Bash completion function.
+prefix. Readline then starts the sequence again. For `bar/` and `baz/`, the sequence
+can be `bar/`, `baz/`, `ba`, `bar/`. A Bash completion function cannot change this
+Readline behavior.
 
-## Try it without changing your setup
+## Test without changes to your configuration
 
-Start a clean Bash session, source the script, and create a few test directories:
+1. Start a Bash session without profile or configuration files.
 
 ```bash
 bash --noprofile --norc
+```
+
+2. Load the script.
+
+```bash
 . /path/to/BashGlobComplete/glob-complete.bash
+```
+
+3. Create the test directories.
+
+```bash
 mkdir -p /tmp/glob-demo/{foo,bar,baz}
+```
+
+4. Go to the test directory.
+
+```bash
 cd /tmp/glob-demo
 ```
 
-Type `cd *a` and press Tab. The matches should be `bar/` and `baz/`.
-Run `exit` when you're done to return to your previous shell.
+5. Type `cd *a`.
+6. Press Tab.
 
-To run the automated checks from the repository directory:
+The expected matches are `bar/` and `baz/`.
+
+7. To return to your previous shell, run `exit`.
+
+### Run the automated checks
+
+1. From the repository directory, run this command.
 
 ```bash
 ./test-glob-complete.bash
