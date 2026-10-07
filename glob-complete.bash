@@ -78,6 +78,11 @@ function __glob_complete_expand_variable_prefix() {
   fi
 
   _variable_value=${!_variable_name}
+  # A directory-changing adapter retains the invoking shell's path prefixes.
+  case $_variable_name in
+    PWD) _variable_value=${_glob_complete_shell_pwd-$_variable_value} ;;
+    OLDPWD) _variable_value=${_glob_complete_shell_oldpwd-$_variable_value} ;;
+  esac
   _expanded_word_output=$_variable_value$_remainder
   _expanded_prefix_output=$_variable_value
   _typed_prefix_output=$_prefix_spelling
@@ -105,8 +110,8 @@ function __glob_complete_expand_tilde_prefix() {
 
   case $_prefix_spelling in
     '~')  _prefix_value=${HOME-} ;;
-    '~+') _prefix_value=$PWD ;;
-    '~-') _prefix_value=${OLDPWD-} ;;
+    '~+') _prefix_value=${_glob_complete_shell_pwd-$PWD} ;;
+    '~-') _prefix_value=${_glob_complete_shell_oldpwd-${OLDPWD-}} ;;
     *)
       [[ $_prefix_spelling =~ ^~[a-zA-Z0-9._-]+$ ]] || return 1
       # The validated expression contains no shell metacharacters other than
@@ -952,6 +957,7 @@ function __glob_complete_git_prepare() {
   local _command=
   local _command_index=0
   local _has_separator=off
+  local _directory_root
   local -a __git_C_args=()
 
   _git_root=$PWD
@@ -1029,6 +1035,7 @@ function __glob_complete_git_prepare() {
     return 1
   fi
 
+  _directory_root=$_git_root
   # An explicit work tree changes the base for repository path arguments,
   # not the base for global directory options.
   if [[ -n $_work_tree ]]; then
@@ -1046,6 +1053,9 @@ function __glob_complete_git_prepare() {
     _argument=$(__git_aliased_command "$_command")
     [[ -z $_argument ]] || _command=$_argument
   fi
+
+  # Tag does not enter the work tree when reading its message file.
+  [[ $_command != tag ]] || _git_root=$_directory_root
 
   # -- paths for commands whose completers defer to Bash after '--'
   for ((_index = _command_index + 1; _index < cword; _index++)); do
@@ -1088,6 +1098,8 @@ function __glob_complete_git_prepare() {
 }
 
 function __glob_complete_git_filedir() {
+  local _glob_complete_shell_pwd=$PWD
+  local _glob_complete_shell_oldpwd=${OLDPWD-}
   local _quote_as_shell_text=off
   local _state
   local _candidate

@@ -219,6 +219,35 @@ function __case() {
 
   __complete git -C ./some/dir/example-one -C "$_root" checkout -- 'alpha*foo'
   __assert_array 'alpha-foo.txt'
+  # Prefixes expand in the invoking shell, before Git applies -C.
+  # shellcheck disable=SC2016 # Keep variable prefixes as command-line text.
+  __complete git -C ./some/dir/example-one checkout -- '$PWD/alpha*foo'
+  # shellcheck disable=SC2016 # Retain the variable prefix.
+  __assert_array '$PWD/alpha-foo.txt'
+  # shellcheck disable=SC2088 # Test literal tilde prefixes.
+  __complete git -C ./some/dir/example-one checkout -- '~+/alpha*foo'
+  # shellcheck disable=SC2088 # Retain the tilde prefix.
+  __assert_array '~+/alpha-foo.txt'
+  OLDPWD=$_root
+  # shellcheck disable=SC2016 # Keep variable prefixes as command-line text.
+  __complete git -C ./some/dir/example-one checkout -- '$OLDPWD/beta*foo'
+  # shellcheck disable=SC2016 # Retain the variable prefix.
+  __assert_array '$OLDPWD/beta-foo.txt'
+  # shellcheck disable=SC2088 # Test literal tilde prefixes.
+  __complete git -C ./some/dir/example-one checkout -- '~-/beta*foo'
+  # shellcheck disable=SC2088 # Retain the tilde prefix.
+  __assert_array '~-/beta-foo.txt'
+
+  __complete git --work-tree ./some/dir/example-one tag -F 'alpha*foo'
+  __assert_array 'alpha-foo.txt'
+  _TEST_LINE='git --work-tree ./some/dir/example-one tag --file=alpha*foo' \
+    __complete git --work-tree ./some/dir/example-one tag --file = 'alpha*foo'
+  __assert_array 'alpha-foo.txt'
+  __complete git -C ./some/dir/example-one --work-tree "$_root" tag -F 'inner*foo'
+  __assert_array 'inner-foo.txt'
+  __complete git --work-tree ./some/dir/example-one commit -F 'inner*foo'
+  __assert_array 'inner-foo.txt'
+
   __complete git -C does-not-exist checkout -- 'alpha*foo'
   __assert_array
   cd -- "$_root/some/dir/example-one"
@@ -276,6 +305,16 @@ function __case() {
   export GIT_TEST_FZF_SELECTION=inner-foo.txt
   __complete git -C ./some/dir/example-one checkout -- '**'
   __assert_array 'inner-foo.txt'
+  # Prefix restoration also applies to fzf selections from a different -C root.
+  export GIT_TEST_FZF_SELECTION=$_root/alpha-foo.txt
+  # shellcheck disable=SC2016 # Keep the variable prefix as command-line text.
+  __complete git -C ./some/dir/example-one checkout -- '$PWD/**'
+  # shellcheck disable=SC2016 # Retain the variable prefix.
+  __assert_array '$PWD/alpha-foo.txt'
+  # shellcheck disable=SC2088 # Test the literal tilde prefix.
+  __complete git -C ./some/dir/example-one checkout -- '~+/**'
+  # shellcheck disable=SC2088 # Retain the tilde prefix.
+  __assert_array '~+/alpha-foo.txt'
   export GIT_TEST_FZF_SELECTION=some/dir/example-one/
   __complete git -C '**'
   __assert_array 'some/dir/example-one'
