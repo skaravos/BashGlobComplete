@@ -561,6 +561,12 @@ function __glob_complete_resolve_fzf_root() {
 }
 
 function __glob_complete_redraw_after_fzf() {
+  # Adapters which collect in a subshell must redraw in their parent shell.
+  # Otherwise bind changes only the child, and terminal escapes pollute data.
+  if [[ -v _glob_complete_redraw_pending ]]; then
+    _glob_complete_redraw_pending=on
+    return 0
+  fi
   # Ask the terminal for its status after fzf restores the screen.
   # The reply is bound to Readline's redraw command so the prompt and complete
   # edit buffer are painted again instead of leaving fzf's selected row drawn
@@ -587,7 +593,7 @@ function __glob_complete_collect_fzf() {
   local _fzf_pid
   local _fzf_status=0
   local _query
-  local _quote_as_shell_text=off
+  local _quote_as_shell_text=${5-off}
   local _root
   local _skip_value
   local _traverse_hidden=off
@@ -819,6 +825,25 @@ function __glob_complete_default() {
 
   COMPREPLY=()
   if __glob_complete_word_has_glob "$_cur"; then
+    case ${1##*/} in
+      git|git.exe)
+        # A clean shell can have Git but no Git completion script at all.
+        # Retain the default handler, with path context for global options.
+        local cur=$_cur
+        local prev=${3-}
+        local cword=${COMP_CWORD-1}
+        local -a words=("${COMP_WORDS[@]}")
+        local _git_root
+        local _git_word
+        local _git_filter
+        local _git_prefix
+        __glob_complete_git_get_words
+        _cur=$cur
+        __glob_complete_git_prepare || true
+        __glob_complete_git_filedir
+        return 0
+        ;;
+    esac
     if __glob_complete_word_has_glob_in_directory "$_cur"; then
       _quote_as_shell_text=on
     fi
@@ -868,10 +893,416 @@ function __glob_complete_generate_bash_completion_filedir() {
 #endregion
 
 # ---
+#region Git completion
+# ---
+
+function __glob_complete_git_get_words() {
+  local _index
+  local _word
+  local _join=off
+
+  if declare -F -- _get_comp_words_by_ref >/dev/null; then
+    _get_comp_words_by_ref -n =: cur words cword prev
+    return
+  fi
+  # A shell without completion helpers still splits attached option values
+  # at '=' and paths at ':'. Reassemble those words without evaluating them.
+  words=()
+  for ((_index = 0; _index <= COMP_CWORD; _index++)); do
+    _word=${COMP_WORDS[_index]}
+    if [[ $_index -gt 0 && ( $_word == = || $_word == : ) ]]; then
+      words[${#words[@]}-1]+=$_word
+      _join=on
+    elif [[ $_join == on ]]; then
+      words[${#words[@]}-1]+=$_word
+      _join=off
+    else
+      words+=("$_word")
+    fi
+  done
+  cword=$((${#words[@]} - 1))
+  cur=${words[cword]}
+  prev=${words[cword-1]}
+}
+
+function __glob_complete_git_expand_argument() {
+  local _word=${1-}
+  local _output_name=${2:?"missing output variable"}
+  local _expanded_prefix
+  local _typed_prefix
+  local dequoted_word
+  local -n _argument_output=$_output_name
+
+  # Git's dequoter removes shell quoting without evaluating command text.
+  if declare -F -- __git_dequote >/dev/null; then
+    __git_dequote "$_word"
+    _word=$dequoted_word
+  fi
+  __glob_complete_expand_prefix \
+    "$_word" _argument_output _expanded_prefix _typed_prefix ||
+    _argument_output=$_word
+}
+
+function __glob_complete_git_prepare() {
+  # The Git dispatcher supplies words, cword and cur through dynamic scope.
+  # These outputs also remain available to the wrapped index-file helper.
+  local _index=1
+  local _argument
+  local _work_tree=${GIT_WORK_TREE-}
+  local _command=
+  local _command_index=0
+  local _has_separator=off
+  local -a __git_C_args=()
+
+  _git_root=$PWD
+  _git_word=${cur-}
+  _git_filter=
+  _git_prefix=
+
+  # __git_complete also registers shell aliases directly for a subcommand.
+  if [[ ${_function-} == _git_* ]]; then
+    _command=${_function#_git_}
+    _command=${_command//_/-}
+  elif [[ ${_function-} == __gitk_main ]]; then
+    _command=log
+  fi
+
+  # -- parse global options, including successive relative -C arguments
+  while [[ -z $_command ]] && ((_index < cword)); do
+    _argument=${words[_index]}
+    case $_argument in
+      -C|--git-dir|--work-tree)
+        if ((_index + 1 == cword)); then
+          _git_filter=-d
+          return 0
+        fi
+        ((_index += 1))
+        if [[ $_argument == --work-tree ]]; then
+          _work_tree=${words[_index]}
+        elif [[ $_argument == -C ]]; then
+          __glob_complete_git_expand_argument "${words[_index]}" _argument
+          case $_argument in
+            '') ;;
+            /*|[a-zA-Z]:/*) _git_root=$_argument ;;
+            *) _git_root+=/$_argument ;;
+          esac
+        fi
+        ;;
+      -C?*)
+        __glob_complete_git_expand_argument "${_argument#-C}" _argument
+        case $_argument in
+          /*|[a-zA-Z]:/*) _git_root=$_argument ;;
+          *) _git_root+=/$_argument ;;
+        esac
+        ;;
+      --work-tree=*) _work_tree=${_argument#*=} ;;
+      -c|--config-env|--namespace)
+        ((_index += 1))
+        ;;
+      --help) _command=help; break ;;
+      -*) ;;
+      *)
+        _command=$_argument
+        _command_index=$_index
+        break
+        ;;
+    esac
+    ((_index += 1))
+  done
+
+  # -- directory arguments before the subcommand
+  if [[ -z $_command ]]; then
+    case $_git_word in
+      --git-dir=*|--work-tree=*|--exec-path=*)
+        _git_prefix=${_git_word%%=*}=
+        _git_word=${_git_word#*=}
+        _git_filter=-d
+        return 0
+        ;;
+      -C?*)
+        _git_prefix=-C
+        _git_word=${_git_word#-C}
+        _git_filter=-d
+        return 0
+        ;;
+    esac
+    return 1
+  fi
+
+  # An explicit work tree changes the base for repository path arguments,
+  # not the base for global directory options.
+  if [[ -n $_work_tree ]]; then
+    __glob_complete_git_expand_argument "$_work_tree" _work_tree
+    case $_work_tree in
+      /*|[a-zA-Z]:/*) _git_root=$_work_tree ;;
+      *) _git_root+=/$_work_tree ;;
+    esac
+  fi
+
+  # Let Git resolve repository aliases without evaluating their shell text.
+  if ! declare -F -- "_git_${_command//-/_}" >/dev/null &&
+    declare -F -- __git_aliased_command >/dev/null; then
+    __git_C_args=(-C "$_git_root")
+    _argument=$(__git_aliased_command "$_command")
+    [[ -z $_argument ]] || _command=$_argument
+  fi
+
+  # -- paths for commands whose completers defer to Bash after '--'
+  for ((_index = _command_index + 1; _index < cword; _index++)); do
+    if [[ ${words[_index]} == -- ]]; then
+      _has_separator=on
+      break
+    fi
+  done
+  if [[ $_has_separator == on ]]; then
+    case $_command in
+      add|checkout|restore|reset|rm|mv|diff|difftool|log|show|grep|ls-files|\
+      ls-tree|status|clean|commit|mergetool)
+        return 0
+        ;;
+    esac
+    return 1
+  fi
+
+  # -- ordinary filesystem arguments which do not use the index-file helper
+  case $_command,${prev-} in
+    commit,-F|commit,--file|tag,-F|tag,--file|\
+    add,--pathspec-from-file|restore,--pathspec-from-file|\
+    reset,--pathspec-from-file|checkout,--pathspec-from-file)
+      return 0
+      ;;
+    init,init|clone,clone)
+      _git_filter=-d
+      return 0
+      ;;
+    apply,apply|am,am) return 0 ;;
+  esac
+  case $_command,$_git_word in
+    commit,--file=*|tag,--file=*|*,--pathspec-from-file=*)
+      _git_prefix=${_git_word%%=*}=
+      _git_word=${_git_word#*=}
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+function __glob_complete_git_filedir() {
+  local _quote_as_shell_text=off
+  local _state
+  local _candidate
+  local _all_directories=on
+  local _original_word=$_git_word
+  local _colon_prefix=
+  local dequoted_word
+  local -a _arr_response=()
+
+  __glob_complete_word_has_glob "$_git_word" || return 1
+  if declare -F -- __git_dequote >/dev/null; then
+    __git_dequote "$_git_word"
+    _git_word=$dequoted_word
+  fi
+  if [[ $_git_root != "$PWD" ]] ||
+    __glob_complete_word_has_glob_in_directory "$_git_word"; then
+    # Readline cannot identify relative directories in a different -C root.
+    # Pre-quote those paths and add directory slashes while in that root.
+    _quote_as_shell_text=on
+  fi
+  if [[ $COMP_WORDBREAKS == *':'* && $_git_word == [a-zA-Z]:/* ]]; then
+    # Git Bash keeps ':' as a word break. Readline leaves the drive prefix
+    # in place, so return only the path after it, with directories pre-quoted.
+    _colon_prefix=${_git_word%%:*}:
+    _quote_as_shell_text=on
+  fi
+
+  # Collect in a subshell so -C never changes PWD, OLDPWD or the directory
+  # stack in the interactive shell. NUL delimiters preserve unusual names.
+  readarray -d '' -t _arr_response < <(
+    cd -- "$_git_root" 2>/dev/null || exit 1
+    local _glob_complete_redraw_pending=off
+    local _fzf_state=inactive
+    local -a _arr_results=()
+    if ! __glob_complete_collect_fzf \
+      "$_git_filter" "$_git_word" _arr_results _fzf_state "$_quote_as_shell_text"; then
+      __glob_complete_collect_filedir \
+        "$_git_filter" "$_git_word" _arr_results "$_quote_as_shell_text"
+    fi
+    printf '%s:%s\0' "$_glob_complete_redraw_pending" "$_fzf_state"
+    if ((${#_arr_results[@]})); then
+      printf '%s\0' "${_arr_results[@]}"
+    fi
+  )
+  if ((${#_arr_response[@]} == 0)); then
+    COMPREPLY=()
+    compopt +o default +o bashdefault 2>/dev/null || true
+    return 0
+  fi
+
+  if [[ ${_arr_response[0]%%:*} == on ]]; then
+    __glob_complete_redraw_after_fzf
+  fi
+  _state=${_arr_response[0]#*:}
+  COMPREPLY=("${_arr_response[@]:1}")
+  if [[ $_state == cancelled ]]; then
+    COMPREPLY=("$_original_word")
+  fi
+  # Readline replaces only the part after '=' when it is a word break.
+  if [[ $_git_prefix == *= && $COMP_WORDBREAKS == *'='* ]]; then
+    _git_prefix=
+  fi
+  for _candidate in "${!COMPREPLY[@]}"; do
+    COMPREPLY[_candidate]=$_git_prefix${COMPREPLY[_candidate]}
+    if [[ -n $_colon_prefix ]]; then
+      COMPREPLY[_candidate]=${COMPREPLY[_candidate]#"$_git_prefix$_colon_prefix"}
+    fi
+    [[ ${COMPREPLY[_candidate]} == */ ]] || _all_directories=off
+  done
+
+  if [[ $_state == cancelled ]]; then
+    compopt +o filenames -o noquote -o nospace 2>/dev/null || true
+  else
+    # Git registers nospace for its non-file completions. File results need
+    # normal spacing, except for already quoted directory paths.
+    compopt +o nospace +o default +o bashdefault 2>/dev/null || true
+    __glob_complete_apply_completion_options \
+      "$_git_word" "$_quote_as_shell_text"
+    if [[ $_all_directories == on && ${#COMPREPLY[@]} -gt 0 ]]; then
+      compopt -o nospace 2>/dev/null || true
+    fi
+  fi
+  return 0
+}
+
+function __glob_complete_git_wrap() {
+  local _function=${1:?"missing Git completion function"}
+  # Git's public wrapper and helpers require these exact variable names.
+  local cur
+  local prev
+  local cword
+  local -a words=()
+  local _git_root
+  local _git_word
+  local _git_filter
+  local _git_prefix
+
+  __glob_complete_git_get_words
+  if ! __glob_complete_word_has_glob "$cur"; then
+    __glob_complete_original_git_wrap "$@"
+    return
+  fi
+
+  if __glob_complete_git_prepare && __glob_complete_git_filedir; then
+    return 0
+  fi
+
+  # Keep Git's own argument classification for index paths and references.
+  # In particular, do not turn branch or tag arguments into filesystem paths.
+  __glob_complete_original_git_wrap "$_function"
+}
+
+function __glob_complete_install_git() {
+  local _definition
+  local _definitions
+
+  # Inspect all small wrapper definitions in one subshell per prompt. Saved
+  # originals are copied only when a loader has replaced a wrapper.
+  _definitions=$(declare -f \
+    __git_func_wrap __git_complete_index_file _comp_load _completion_loader) || true
+
+  if declare -F -- __git_func_wrap >/dev/null; then
+    if [[ $_definitions != *'__glob_complete_git_wrap'* ]]; then
+      _definition=$(declare -f __git_func_wrap)
+      _definition=${_definition/#__git_func_wrap /__glob_complete_original_git_wrap }
+      eval -- "$_definition"
+      function __git_func_wrap() {
+        __glob_complete_git_wrap "$@"
+      }
+    fi
+  fi
+  if declare -F -- __git_complete_index_file >/dev/null; then
+    if [[ $_definitions != *'__glob_complete_git_filedir'* ]]; then
+      _definition=$(declare -f __git_complete_index_file)
+      _definition=${_definition/#__git_complete_index_file /__glob_complete_original_git_index_file }
+      eval -- "$_definition"
+      function __git_complete_index_file() {
+        if [[ -n ${_git_root-} ]] && __glob_complete_git_filedir; then
+          return 0
+        fi
+        __glob_complete_original_git_index_file "$@"
+      }
+    fi
+  fi
+
+  # The lazy loader must install the adapter before Readline retries the
+  # first completion. A prompt hook alone would miss that first Tab press.
+  if declare -F -- _comp_load >/dev/null; then
+    if [[ $_definitions != *'__glob_complete_original_git_load'* ]]; then
+      _definition=$(declare -f _comp_load)
+      _definition=${_definition/#_comp_load /__glob_complete_original_git_load }
+      eval -- "$_definition"
+      function _comp_load() {
+        local _status=0
+        __glob_complete_original_git_load "$@" || _status=$?
+        __glob_complete_install_git
+        return "$_status"
+      }
+    fi
+  elif declare -F -- _completion_loader >/dev/null; then
+    # Older bash-completion releases still load Git's independent completer.
+    if [[ $_definitions != *'__glob_complete_original_git_legacy_load'* ]]; then
+      _definition=$(declare -f _completion_loader)
+      _definition=${_definition/#_completion_loader /__glob_complete_original_git_legacy_load }
+      eval -- "$_definition"
+      function _completion_loader() {
+        local _status=0
+        __glob_complete_original_git_legacy_load "$@" || _status=$?
+        __glob_complete_install_git
+        return "$_status"
+      }
+    fi
+  fi
+}
+
+function __glob_complete_git_prompt() {
+  local _status=$?
+  __glob_complete_install_git
+  return "$_status"
+}
+
+function __glob_complete_register_git_prompt() {
+  local _declaration
+  local _command
+
+  _declaration=$(declare -p PROMPT_COMMAND 2>/dev/null) || _declaration=
+  [[ -n $_declaration ]] || declare -g PROMPT_COMMAND
+  # Do not change readonly or associative prompt variables.
+  [[ $_declaration =~ ^declare\ -[^[:space:]]*[rA] ]] && return 0
+  if [[ $_declaration =~ ^declare\ -[^[:space:]]*a ]]; then
+    for _command in "${PROMPT_COMMAND[@]}"; do
+      [[ $_command == __glob_complete_git_prompt ]] && return 0
+    done
+    PROMPT_COMMAND=(__glob_complete_git_prompt "${PROMPT_COMMAND[@]}")
+  elif [[ ${PROMPT_COMMAND-} != *'__glob_complete_git_prompt'* ]]; then
+    # shellcheck disable=SC2178,SC2128 # declare -p confirmed a scalar prompt variable.
+    PROMPT_COMMAND="__glob_complete_git_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+  fi
+}
+
+#endregion
+
+# ---
 #region installation
 # ---
 
 function __glob_complete_install_default() {
+  local _spec
+
+  # Git can be lazy-loaded by older bash-completion versions even though
+  # their generic filedir API is not supported. Keep that default loader.
+  if declare -F -- _completion_loader >/dev/null; then
+    _spec=$(complete -p -D 2>/dev/null) || _spec=
+    [[ $_spec == *'-F _completion_loader'* ]] && return 0
+  fi
   complete -D -F __glob_complete_default -o bashdefault -o default
 }
 
@@ -986,6 +1417,10 @@ function __glob_complete_enable() {
     __glob_complete_install_bash_completion
   else
     __glob_complete_install_default
+  fi
+  __glob_complete_install_git
+  if [[ $- == *i* ]]; then
+    __glob_complete_register_git_prompt
   fi
 }
 

@@ -74,6 +74,34 @@ cd @(build|dist)<Tab>
 shopt -s nocaseglob
 ```
 
+## Complete Git paths
+
+The script also integrates with Git's Bash completion script. This integration does
+not require bash-completion or extra configuration. You can load this script before
+or after Git's completion script.
+
+1. In a Git path argument, type a glob.
+2. Press Tab.
+
+```text
+git checkout -- ./*foo<Tab>
+git add src/*test<Tab>
+git -C ./some/dir/*xampl<Tab>
+git -C ./some/dir checkout -- ./*foo<Tab>
+```
+
+For `git -C`, completion gives only directories. Earlier `-C` arguments change the
+base directory for later path arguments. An explicit work tree also changes the
+base for repository paths. Variable and tilde prefixes remain unchanged.
+
+Explicit globs use filesystem matches, including untracked and ignored files.
+Git might not accept every path. Without globs, Git keeps its usual completion
+rules for files, branches, tags, options, and commands.
+
+The script checks the Git integration before each interactive prompt. The script
+also restores the integration after a completion loader loads Git's script.
+This supports the first Tab request when Git completion loads on demand.
+
 ## Select a path with fzf
 
 The fzf path selector lets you search below a directory. This feature requires
@@ -281,3 +309,10 @@ The expected matches are `bar/` and `baz/`.
 ```bash
 ./test-glob-complete.bash
 ```
+
+The checks include `test-git-complete.bash`. Integration checks require the relevant
+completion scripts. The checks skip an integration when its completion script is
+unavailable.
+
+1. To select a Git completion script for the checks, set `GIT_COMPLETION_FILE`.
+2. To select a bash-completion script for the checks, set `BASH_COMPLETION_FILE`.

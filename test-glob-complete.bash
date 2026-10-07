@@ -103,9 +103,11 @@ function __main() {
     "$_tmp_dir/project-one/read me.txt" \
     "$_tmp_dir/project-one/.hidden.txt" \
     "$_tmp_dir/project-two/read me.txt"
-  ln -s -- \
+  if ! MSYS="${MSYS:+$MSYS }winsymlinks:nativestrict" ln -s -- \
     "$_tmp_dir/project-one" \
-    "$_tmp_dir/project-one/cycle"
+    "$_tmp_dir/project-one/cycle" 2>/dev/null; then
+    __print_warn 'directory symlinks unavailable; skipping the symlink-cycle fixture'
+  fi
   cd -- "$_tmp_dir"
   HOME=$_tmp_dir
 
@@ -314,21 +316,22 @@ function __main() {
     __fail 'could not select find'
   [[ $_find_backend == find && $_find_command == find ]] ||
     __fail "find was not selected first: $_find_backend [$_find_command]"
-  chmod -x -- "$_scanner_test_bin/find"
+  # Git Bash does not reliably remove execute permission from shell scripts.
+  mv -- "$_scanner_test_bin/find" "$_scanner_test_bin/find.disabled"
 
   PATH=$_scanner_test_bin \
     __glob_complete_select_find_command _find_backend _find_command ||
     __fail 'could not select fdfind'
   [[ $_find_backend == fd && $_find_command == fdfind ]] ||
     __fail "fdfind was not selected second: $_find_backend [$_find_command]"
-  chmod -x -- "$_scanner_test_bin/fdfind"
+  mv -- "$_scanner_test_bin/fdfind" "$_scanner_test_bin/fdfind.disabled"
 
   PATH=$_scanner_test_bin \
     __glob_complete_select_find_command _find_backend _find_command ||
     __fail 'could not select fd'
   [[ $_find_backend == fd && $_find_command == fd ]] ||
     __fail "fd was not selected third: $_find_backend [$_find_command]"
-  chmod -x -- "$_scanner_test_bin/fd"
+  mv -- "$_scanner_test_bin/fd" "$_scanner_test_bin/fd.disabled"
 
   PATH=$_scanner_test_bin \
     __glob_complete_select_find_command _find_backend _find_command ||
@@ -658,6 +661,8 @@ function __main() {
     GLOB_COMPLETE_FZF_TEST_SELECTION \
     GLOB_COMPLETE_FZF_TEST_WALKER \
     GLOB_COMPLETE_FZF_TEST_WALKER_SKIP
+
+  bash "$_SCRIPT_DIR/test-git-complete.bash"
 
   if [[ ! -r $_bash_completion ]]; then
     __print_warn "not found: $_bash_completion; skipping bash-completion integration tests"
